@@ -26,12 +26,23 @@ if(WIN32)
     )
 endif()
 
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/assets
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets
-    COMMENT "Copying assets to build directory"
-)
+if(APPLE)
+    # For macOS .app bundles GLFW's COCOA_CHDIR_RESOURCES switches the working
+    # directory to Contents/Resources at launch, so assets must live there.
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/assets
+            $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/assets
+        COMMENT "Copying assets into .app bundle Resources"
+    )
+else()
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/assets
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets
+        COMMENT "Copying assets to build directory"
+    )
+endif()
 
 # ------------------------------------------------------------
 # Installation rules (used by CPack)
@@ -68,6 +79,10 @@ elseif(APPLE)
     )
     # Install as a .app bundle instead of a bare binary
     install(TARGETS ${PROJECT_NAME} BUNDLE DESTINATION .)
+    # Bundle the assets inside Contents/Resources so they are found at runtime
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/assets/
+        DESTINATION MishChess.app/Contents/Resources/assets
+    )
 else()
     # Linux: prefer DEB, fall back to RPM and TGZ
     set(CPACK_GENERATOR "DEB;RPM;TGZ")

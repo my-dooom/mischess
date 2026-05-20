@@ -12,7 +12,7 @@ void check_possible_moves(piece board[8][8], board_pos pos,
         if (next_row >= 0 && next_row < 8 &&
             board[next_row][pos.col].type == EMPTY) {
             da_append(*moves, ((Vector2){pos.col, next_row}));
-            if (p.en_passant) {
+            if (p.has_moved == false) {
                 int double_row = pos.row + 2 * dir;
                 if (double_row >= 0 && double_row < 8 &&
                     board[double_row][pos.col].type == EMPTY) {
@@ -152,7 +152,6 @@ int move_piece(piece board[8][8], board_pos src, board_pos dest) {
         board[src.row][dest.col].type = EMPTY;
     }
     board[dest.row][dest.col] = board[src.row][src.col];
-    board[dest.row][dest.col].en_passant = false;
     board[src.row][src.col].type = EMPTY;
     board[dest.row][dest.col].has_moved = true;
     return 1;

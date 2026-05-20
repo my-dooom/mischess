@@ -10,11 +10,15 @@
 // Program main entry point
 //------------------------------------------------------------------------------------
 
-static void handle_input(int target_row, int target_col,
-                         board_pos *sel, possible_moves *moves, color *moving_color) {
+static void handle_input(int target_row, int target_col, board_pos *sel,
+                         possible_moves *moves, color *moving_color) {
     if (target_row < 0 || target_col < 0 || current_anim.active)
         return;
-    if (sel->row < 0 || board[sel->row][sel->col].type == EMPTY) {
+    // selection phase: if no piece selected,
+    // or clicked on empty square,
+    // or clicked on opponent's piece -> select new piece
+    if (sel->row < 0 || board[sel->row][sel->col].type == EMPTY ||
+        board[sel->row][sel->col].color != *moving_color) {
         if (board[target_row][target_col].color != *moving_color)
             return;
         *sel = (board_pos){target_row, target_col};
@@ -42,6 +46,15 @@ static void handle_input(int target_row, int target_col,
     }
 
     if (!valid_move) {
+        // cannot move to target square,
+        // but if it has a piece of the
+        // same color, select it
+        if (board[target_row][target_col].color != *moving_color ||
+            board[target_row][target_col].type == EMPTY) {
+            *sel = null_pos;
+            moves->count = 0;
+            return;
+        }
         *sel = (board_pos){target_row, target_col};
         moves->count = 0;
         check_possible_moves(board, *sel, moves);
