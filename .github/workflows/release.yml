@@ -43,10 +43,10 @@ jobs:
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: mishchess-${{ matrix.name }}
+          name: mischess-${{ matrix.name }}
           path: |
-            build/MishChess-*.zip
-            build/MishChess-*.dmg
+            build/mischess-*.zip
+            build/mischess-*.dmg
 
   release:
     needs: build

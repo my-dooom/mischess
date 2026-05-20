@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(mishchess C)
+project(mischess C)
 
 set(CMAKE_C_STANDARD 99)
 
@@ -57,31 +57,31 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/assets/
 # ------------------------------------------------------------
 # CPack — generates platform-native installers
 # ------------------------------------------------------------
-set(CPACK_PACKAGE_NAME        "MishChess")
+set(CPACK_PACKAGE_NAME        "mischess")
 set(CPACK_PACKAGE_VENDOR      "miszc")
 set(CPACK_PACKAGE_VERSION     "1.0.0")
 set(CPACK_PACKAGE_DESCRIPTION "A chess game built with raylib")
-set(CPACK_PACKAGE_EXECUTABLES "${PROJECT_NAME};MishChess")
+set(CPACK_PACKAGE_EXECUTABLES "${PROJECT_NAME};mischess")
 
 # Windows: NSIS installer (requires NSIS installed on the build machine)
 if(WIN32)
     set(CPACK_GENERATOR "ZIP")
 elseif(APPLE)
     set(CPACK_GENERATOR "DragNDrop")
-    set(CPACK_DMG_VOLUME_NAME "MishChess")
+    set(CPACK_DMG_VOLUME_NAME "mischess")
     # Package the executable as a proper .app bundle
     set_target_properties(${PROJECT_NAME} PROPERTIES
         MACOSX_BUNDLE TRUE
-        MACOSX_BUNDLE_BUNDLE_NAME        "MishChess"
+        MACOSX_BUNDLE_BUNDLE_NAME        "mischess"
         MACOSX_BUNDLE_BUNDLE_VERSION     "1.0.0"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0.0"
-        MACOSX_BUNDLE_GUI_IDENTIFIER     "com.miszc.mishchess"
+        MACOSX_BUNDLE_GUI_IDENTIFIER     "com.miszc.mischess"
     )
     # Install as a .app bundle instead of a bare binary
     install(TARGETS ${PROJECT_NAME} BUNDLE DESTINATION .)
     # Bundle the assets inside Contents/Resources so they are found at runtime
     install(DIRECTORY ${CMAKE_SOURCE_DIR}/assets/
-        DESTINATION MishChess.app/Contents/Resources/assets
+        DESTINATION mischess.app/Contents/Resources/assets
     )
 else()
     # Linux: prefer DEB, fall back to RPM and TGZ
