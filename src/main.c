@@ -1,5 +1,6 @@
 
 #include "board.h"
+#include "fen.h"
 #include "game.h"
 #include "logger.h"
 #include "raylib.h"
@@ -82,6 +83,8 @@ static void handle_input(int target_row, int target_col, board_pos *sel,
         start_move_animation(&current_anim, moving_piece, *sel,
                              (board_pos){target_row, target_col});
         TraceLog(LOG_INFO, "Moved piece to: %d, %d", target_row, target_col);
+        update_fen_table(board);
+        print_fen();
     }
     // Update en passant square: set if double pawn push, clear otherwise
     en_passant_square = null_pos;
@@ -148,6 +151,7 @@ int main(void) {
     initialize_render("assets/atlas.png", &tex_pattern, tiles);
 
     initialize_board(board);
+    update_fen_table(board);
 
     SetTargetFPS(60); // Set our game to run at 60 frames-per-second
     // Main game loop

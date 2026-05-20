@@ -1,4 +1,5 @@
-
+#ifndef LOGGER_H
+#define LOGGER_H
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -26,3 +27,5 @@ void LogColored(int msgType, const char *text, va_list args) {
     vprintf(text, args);
     printf("\n");
 }
+
+#endif // LOGGER_H
