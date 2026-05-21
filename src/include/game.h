@@ -27,4 +27,6 @@ int move_piece(piece board[8][8], board_pos src, board_pos dest);
 
 int long_castle(piece board[8][8], color player_color);
 int short_castle(piece board[8][8], color player_color);
+
+void update_capture_matrices(piece board[8][8]);
 #endif // GAME_H

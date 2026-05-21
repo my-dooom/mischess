@@ -20,14 +20,23 @@ void check_possible_moves(piece board[8][8], board_pos pos,
                 }
             }
         }
-        // diagonal captures
+
+        // diagonal captures / defences
         int capture_cols[] = {pos.col - 1, pos.col + 1};
         for (int i = 0; i < 2; i++) {
             int c = capture_cols[i];
             if (next_row >= 0 && next_row < 8 && c >= 0 && c < 8 &&
-                board[next_row][c].type != EMPTY &&
-                board[next_row][c].color != p.color) {
-                da_append(*moves, ((Vector2){c, next_row}));
+                board[next_row][c].type != EMPTY) {
+                if (board[next_row][c].color != p.color) {
+                    da_append(*moves, ((Vector2){c, next_row}));
+                    board[next_row][c].capture_matrix[pos.row][pos.col] = 1;
+                    if (board[next_row][c].type == KING) {
+                        TraceLog(LOG_INFO, "King in check at position: %c%d",
+                                 'A' + c, next_row + 1);
+                    }
+                } else {
+                    board[next_row][c].defence_matrix[pos.row][pos.col] = 1;
+                }
             }
         }
         // en passant capture
@@ -40,6 +49,7 @@ void check_possible_moves(piece board[8][8], board_pos pos,
         }
         break;
     }
+
     case ROOK: {
         int dirs[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
         for (int d = 0; d < 4; d++) {
@@ -49,8 +59,17 @@ void check_possible_moves(piece board[8][8], board_pos pos,
                 if (board[r][c].type == EMPTY) {
                     da_append(*moves, ((Vector2){c, r}));
                 } else {
-                    if (board[r][c].color != p.color)
+                    if (board[r][c].color != p.color) {
                         da_append(*moves, ((Vector2){c, r})); // capture
+                        board[r][c].capture_matrix[pos.row][pos.col] = 1;
+                        if (board[r][c].type == KING) {
+                            TraceLog(LOG_INFO,
+                                     "King in check at position: %c%d", 'A' + c,
+                                     r + 1);
+                        }
+                    } else {
+                        board[r][c].defence_matrix[pos.row][pos.col] = 1;
+                    }
                     break; // blocked either way
                 }
                 r += dr;
@@ -68,8 +87,17 @@ void check_possible_moves(piece board[8][8], board_pos pos,
                 if (board[r][c].type == EMPTY) {
                     da_append(*moves, ((Vector2){c, r}));
                 } else {
-                    if (board[r][c].color != p.color)
+                    if (board[r][c].color != p.color) {
                         da_append(*moves, ((Vector2){c, r})); // capture
+                        board[r][c].capture_matrix[pos.row][pos.col] = 1;
+                        if (board[r][c].type == KING) {
+                            TraceLog(LOG_INFO,
+                                     "King in check at position: %c%d", 'A' + c,
+                                     r + 1);
+                        }
+                    } else {
+                        board[r][c].defence_matrix[pos.row][pos.col] = 1;
+                    }
                     break; // blocked either way
                 }
                 r += dr;
@@ -89,8 +117,17 @@ void check_possible_moves(piece board[8][8], board_pos pos,
                 if (board[r][c].type == EMPTY) {
                     da_append(*moves, ((Vector2){c, r}));
                 } else {
-                    if (board[r][c].color != p.color)
+                    if (board[r][c].color != p.color) {
                         da_append(*moves, ((Vector2){c, r})); // capture
+                        board[r][c].capture_matrix[pos.row][pos.col] = 1;
+                        if (board[r][c].type == KING) {
+                            TraceLog(LOG_INFO,
+                                     "King in check at position: %c%d", 'A' + c,
+                                     r + 1);
+                        }
+                    } else {
+                        board[r][c].defence_matrix[pos.row][pos.col] = 1;
+                    }
                     break; // blocked either way
                 }
                 r += dr;
@@ -104,9 +141,12 @@ void check_possible_moves(piece board[8][8], board_pos pos,
                           {-1, 0}, {1, 0}, {0, -1}, {0, 1}};
         for (int d = 0; d < 8; d++) {
             int r = pos.row + dirs[d][0], c = pos.col + dirs[d][1];
-            if (r >= 0 && r < 8 && c >= 0 && c < 8 &&
-                (board[r][c].type == EMPTY || board[r][c].color != p.color)) {
-                da_append(*moves, ((Vector2){c, r}));
+            if (r >= 0 && r < 8 && c >= 0 && c < 8) {
+                if (board[r][c].type == EMPTY || board[r][c].color != p.color) {
+                    da_append(*moves, ((Vector2){c, r}));
+                } else {
+                    board[r][c].defence_matrix[pos.row][pos.col] = 1;
+                }
             }
         }
         // Castling
@@ -132,9 +172,15 @@ void check_possible_moves(piece board[8][8], board_pos pos,
         for (int i = 0; i < 8; i++) {
             int r = pos.row + jumps[i][0];
             int c = pos.col + jumps[i][1];
-            if (r >= 0 && r < 8 && c >= 0 && c < 8 &&
-                (board[r][c].type == EMPTY || board[r][c].color != p.color)) {
-                da_append(*moves, ((Vector2){c, r}));
+            if (r >= 0 && r < 8 && c >= 0 && c < 8) {
+                if (board[r][c].type == EMPTY || board[r][c].color != p.color) {
+                    da_append(*moves, ((Vector2){c, r}));
+                    if (board[r][c].type != EMPTY) {
+                        board[r][c].capture_matrix[pos.row][pos.col] = 1;
+                    }
+                } else {
+                    board[r][c].defence_matrix[pos.row][pos.col] = 1;
+                }
             }
         }
         break;
@@ -152,9 +198,38 @@ int move_piece(piece board[8][8], board_pos src, board_pos dest) {
         board[src.row][dest.col].type = EMPTY;
     }
     board[dest.row][dest.col] = board[src.row][src.col];
+    // Clear stale matrices — threats/defences at the new square must be
+    // recomputed; the old data belonged to the previous board position.
+    for (int r = 0; r < 8; r++)
+        for (int c = 0; c < 8; c++) {
+            board[dest.row][dest.col].capture_matrix[r][c] = 0;
+            board[dest.row][dest.col].defence_matrix[r][c] = 0;
+        }
     board[src.row][src.col].type = EMPTY;
     board[dest.row][dest.col].has_moved = true;
     return 1;
+}
+
+void update_capture_matrices(piece board[8][8]) {
+    // Clear all capture and defence matrices
+    for (int r = 0; r < 8; r++)
+        for (int c = 0; c < 8; c++)
+            for (int i = 0; i < 8; i++)
+                for (int j = 0; j < 8; j++) {
+                    board[r][c].capture_matrix[i][j] = 0;
+                    board[r][c].defence_matrix[i][j] = 0;
+                }
+    // Recompute by scanning every piece
+    possible_moves tmp = {0};
+    for (int r = 0; r < 8; r++) {
+        for (int c = 0; c < 8; c++) {
+            if (board[r][c].type != EMPTY) {
+                tmp.count = 0;
+                check_possible_moves(board, (board_pos){r, c}, &tmp);
+            }
+        }
+    }
+    free(tmp.pos);
 }
 
 int long_castle(piece board[8][8], color player_color) {
