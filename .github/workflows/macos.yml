@@ -1,0 +1,33 @@
+name: macOS Build
+
+on:
+  push:
+    branches:
+      - macos
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    name: Build (macOS)
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles"
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package
+        working-directory: build
+        run: cpack -C Release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mischess-macOS
+          path: build/mischess-*.dmg
