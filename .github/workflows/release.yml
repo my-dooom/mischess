@@ -8,30 +8,19 @@ on:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            name: Windows
-            generator: "MinGW Makefiles"
-          - os: macos-latest
-            name: macOS
-            generator: "Unix Makefiles"
-
-    runs-on: ${{ matrix.os }}
-    name: Build (${{ matrix.name }})
+    runs-on: windows-latest
+    name: Build (Windows)
 
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Add MinGW to PATH (Windows)
-        if: matrix.os == 'windows-latest'
+      - name: Add MinGW to PATH
         run: echo "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G "${{ matrix.generator }}"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G "MinGW Makefiles"
 
       - name: Build
         run: cmake --build build --config Release
@@ -43,10 +32,8 @@ jobs:
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: mischess-${{ matrix.name }}
-          path: |
-            build/mischess-*.zip
-            build/mischess-*.dmg
+          name: mischess-Windows
+          path: build/mischess-*.zip
 
   release:
     needs: build
