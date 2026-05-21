@@ -5,7 +5,6 @@
 #include "raylib.h"
 
 #include "game.h"
-
 typedef struct {
     Rectangle rec_pos_from_texture;
 } tile;
