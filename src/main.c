@@ -11,6 +11,22 @@
 // Program main entry point
 //------------------------------------------------------------------------------------
 
+void print_available_captures(int target_row, int target_col, possible_moves *piece_moves) {
+            const char *piece_names[] = {"Empty", "Pawn",  "Knight", "Bishop",
+                                     "Rook",  "Queen", "King"};
+        const char *col_names[] = {"A", "B", "C", "D", "E", "F", "G", "H"};
+        printf("Captures available from %s%d:\n", col_names[target_col],
+               8 - target_row);
+        for (size_t i = 0; i < piece_moves->count; i++) {
+            int mr = (int)piece_moves->pos[i].y;
+            int mc = (int)piece_moves->pos[i].x;
+            if (board[mr][mc].type != EMPTY) {
+                printf("  can capture %s at %s%d\n",
+                       piece_names[board[mr][mc].type], col_names[mc], 8 - mr);
+            }
+        }
+}
+
 static void handle_input(int target_row, int target_col, board_pos *sel,
                          possible_moves *moves, color *moving_color) {
     if (target_row < 0 || target_col < 0 || current_anim.active)
@@ -25,9 +41,10 @@ static void handle_input(int target_row, int target_col, board_pos *sel,
         *sel = (board_pos){target_row, target_col};
         moves->count = 0;
         check_possible_moves(board, *sel, moves);
-        TraceLog(LOG_INFO, "Selected piece: %d of color %d",
+        TraceLog(LOG_DEBUG, "Selected piece: %d of color %d",
                  board[sel->row][sel->col].type,
                  board[sel->row][sel->col].color);
+        print_available_captures(target_row, target_col, moves);
         return;
     }
 
@@ -59,9 +76,6 @@ static void handle_input(int target_row, int target_col, board_pos *sel,
         *sel = (board_pos){target_row, target_col};
         moves->count = 0;
         check_possible_moves(board, *sel, moves);
-        TraceLog(LOG_INFO, "Selected piece: %d of color %d",
-                 board[sel->row][sel->col].type,
-                 board[sel->row][sel->col].color);
         return;
     }
 
@@ -82,25 +96,15 @@ static void handle_input(int target_row, int target_col, board_pos *sel,
         move_piece(board, *sel, (board_pos){target_row, target_col});
         start_move_animation(&current_anim, moving_piece, *sel,
                              (board_pos){target_row, target_col});
-        TraceLog(LOG_INFO, "Moved piece to: %d, %d", target_row, target_col);
+        TraceLog(LOG_DEBUG, "Moved piece to: %d, %d", target_row, target_col);
         update_fen_table(board);
         update_capture_matrices(board);
         possible_moves piece_moves = {0};
         check_possible_moves(board, (board_pos){target_row, target_col},
-                             &piece_moves);
-        const char *piece_names[] = {"Empty", "Pawn",  "Knight", "Bishop",
-                                     "Rook",  "Queen", "King"};
-        const char *col_names[] = {"A", "B", "C", "D", "E", "F", "G", "H"};
-        printf("Captures available from %s%d:\n", col_names[target_col],
-               8 - target_row);
-        for (size_t i = 0; i < piece_moves.count; i++) {
-            int mr = (int)piece_moves.pos[i].y;
-            int mc = (int)piece_moves.pos[i].x;
-            if (board[mr][mc].type != EMPTY) {
-                printf("  can capture %s at %s%d\n",
-                       piece_names[board[mr][mc].type], col_names[mc], 8 - mr);
-            }
-        }
+        &piece_moves);
+        
+        print_available_captures(target_row, target_col, &piece_moves);
+
         free(piece_moves.pos);
         fflush(stdout);
         print_fen();
