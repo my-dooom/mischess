@@ -133,7 +133,7 @@ int load_fen(const char *fen, piece board[8][8], game_state *state) {
     state->turn = (*p == 'b');
     p++;
 
-    if (!*p || *p == ' ') return 1;
+    if (!*p) return 1;
     p++; // skip space
 
     // castling rights
@@ -166,7 +166,7 @@ int load_fen(const char *fen, piece board[8][8], game_state *state) {
         p++;
     }
 
-    if (!*p || *p == ' ') return 1;
+    if (!*p) return 1;
     p++; // skip space
 
     // halfmove clock
@@ -178,6 +178,19 @@ int load_fen(const char *fen, piece board[8][8], game_state *state) {
     // fullmove number
     int fullmove = atoi(p);
     state->move_count = (size_t)((fullmove - 1) * 2 + (state->turn ? 1 : 0));
+
+    // sync has_moved with castling rights so generate_king_moves works
+    // pieces default to has_moved=true; clear only when the right is active
+    if (state->can_castle_short[White] || state->can_castle_long[White]) {
+        board[7][4].has_moved = false; // white king e1
+        if (state->can_castle_short[White]) board[7][7].has_moved = false;
+        if (state->can_castle_long[White])  board[7][0].has_moved = false;
+    }
+    if (state->can_castle_short[Black] || state->can_castle_long[Black]) {
+        board[0][4].has_moved = false; // black king e8
+        if (state->can_castle_short[Black]) board[0][7].has_moved = false;
+        if (state->can_castle_long[Black])  board[0][0].has_moved = false;
+    }
 
     return 1;
 }
