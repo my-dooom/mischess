@@ -138,18 +138,14 @@ static void handle_input(int target_row, int target_col, game_state *state) {
 
     if (moving_piece.type == KING && abs(target_col - sel->col) == 2) {
         if (target_col == 6) {
-            short_castle(
-                board,
-                moving_piece.color); // TODO: add validation for checking if
-                                     // there is not any captures on the path
+            // castling validity is fully checked in generate_king_moves so we
+            // only need to execute the rook and king moves here
+            short_castle(board, moving_piece.color);
             start_move_animation(&current_anim, moving_piece, *sel,
                                  (board_pos){target_row, target_col});
             TraceLog(LOG_INFO, "Short castling performed");
         } else if (target_col == 2) {
-            long_castle(
-                board,
-                moving_piece.color); // TODO: add validation for checking if
-                                     // there is not any captures on the path
+            long_castle(board, moving_piece.color);
             start_move_animation(&current_anim, moving_piece, *sel,
                                  (board_pos){target_row, target_col});
             TraceLog(LOG_INFO, "Long castling performed");
