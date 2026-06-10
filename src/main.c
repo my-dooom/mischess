@@ -152,7 +152,7 @@ static void handle_input(int target_row, int target_col, game_state *state) {
         }
         state->can_castle_short[moving_color] = false;
         state->can_castle_long[moving_color] = false;
-        update_fen_table(board);
+        update_full_fen(board, state);
         update_capture_matrices(board);
         state->halfmove_clock++;
         state->move_count++;
@@ -179,7 +179,7 @@ static void handle_input(int target_row, int target_col, game_state *state) {
         start_move_animation(&current_anim, moving_piece, *sel,
                              (board_pos){target_row, target_col});
         TraceLog(LOG_DEBUG, "Moved piece to: %d, %d", target_row, target_col);
-        update_fen_table(board);
+        update_full_fen(board, state);
         possible_moves piece_moves = {0};
         check_possible_moves(board, (board_pos){target_row, target_col},
                              &piece_moves);
@@ -267,7 +267,7 @@ int main(void) {
 
     initialize_board(board);
     init_game_state(&game);
-    update_fen_table(board);
+    update_full_fen(board, &game);
     update_capture_matrices(board); // seed attacked_by cache before first move
 
     SetTargetFPS(60); // Set our game to run at 60 frames-per-second
@@ -300,7 +300,7 @@ int main(void) {
         if (IsKeyPressed(KEY_R)) {
             initialize_board(board);
             init_game_state(&game);
-            update_fen_table(board);
+            update_full_fen(board, &game);
             update_capture_matrices(board);
             TraceLog(LOG_INFO, "Game reset");
         }
