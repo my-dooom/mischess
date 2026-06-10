@@ -62,7 +62,7 @@ static bool select_piece_if_owned(int target_row, int target_col,
     }
     *sel = (board_pos){target_row, target_col};
     moves->count = 0;
-    check_possible_moves(board, *sel, moves);
+    generate_legal_moves(board, *sel, moves);
     TraceLog(LOG_DEBUG, "Selected piece: %d of color %d",
              board[sel->row][sel->col].type, board[sel->row][sel->col].color);
     print_available_captures(target_row, target_col, moves);

@@ -43,6 +43,8 @@ void init_game_state(game_state *state);
 
 void check_possible_moves(piece board[8][8], board_pos pos,
                           possible_moves *moves);
+void generate_legal_moves(piece board[8][8], board_pos pos,
+                          possible_moves *moves);
 
 int move_piece(piece board[8][8], board_pos src, board_pos dest);
 

@@ -1,5 +1,6 @@
 #include "game.h"
 #include "raylib.h"
+#include <string.h>
 
 game_state game = {0};
 
@@ -199,6 +200,43 @@ static void generate_knight_moves(piece board[8][8], board_pos pos,
     }
 }
 
+static board_pos find_king_pos(piece board[8][8], color king_color) {
+    for (int row = 0; row < 8; row++) {
+        for (int col = 0; col < 8; col++) {
+            if (board[row][col].type == KING &&
+                board[row][col].color == king_color) {
+                return (board_pos){row, col};
+            }
+        }
+    }
+    return NULL_POS;
+}
+
+static void apply_simulated_move(piece board[8][8], board_pos src,
+                                 board_pos dest) {
+    piece moving_piece = board[src.row][src.col];
+    if (moving_piece.type == KING && abs(dest.col - src.col) == 2) {
+        int row = src.row;
+        if (dest.col == 6) {
+            board[row][6] = board[row][4];
+            board[row][6].has_moved = true;
+            board[row][4].type = EMPTY;
+            board[row][5] = board[row][7];
+            board[row][5].has_moved = true;
+            board[row][7].type = EMPTY;
+        } else if (dest.col == 2) {
+            board[row][2] = board[row][4];
+            board[row][2].has_moved = true;
+            board[row][4].type = EMPTY;
+            board[row][3] = board[row][0];
+            board[row][3].has_moved = true;
+            board[row][0].type = EMPTY;
+        }
+        return;
+    }
+    move_piece(board, src, dest);
+}
+
 void check_possible_moves(piece board[8][8], board_pos pos,
                           possible_moves *moves) {
     switch (board[pos.row][pos.col].type) {
@@ -223,6 +261,33 @@ void check_possible_moves(piece board[8][8], board_pos pos,
     default:
         break;
     }
+}
+
+void generate_legal_moves(piece board[8][8], board_pos pos,
+                          possible_moves *moves) {
+    possible_moves pseudo = {0};
+    color mover = board[pos.row][pos.col].color;
+    color opp = (mover == White) ? Black : White;
+
+    check_possible_moves(board, pos, &pseudo);
+    moves->count = 0;
+
+    for (size_t i = 0; i < pseudo.count; i++) {
+        board_pos dest = {(int)pseudo.pos[i].y, (int)pseudo.pos[i].x};
+        piece sim_board[8][8];
+        memcpy(sim_board, board, sizeof(sim_board));
+        apply_simulated_move(sim_board, pos, dest);
+        update_capture_matrices(sim_board);
+
+        board_pos king_pos = find_king_pos(sim_board, mover);
+        if (king_pos.row < 0)
+            continue;
+        if (!sim_board[king_pos.row][king_pos.col].attacked_by[opp]) {
+            da_append(*moves, ((Vector2){dest.col, dest.row}));
+        }
+    }
+
+    free(pseudo.pos);
 }
 
 int move_piece(piece board[8][8], board_pos src, board_pos dest) {
