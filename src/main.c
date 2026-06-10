@@ -166,6 +166,13 @@ static void handle_input(int target_row, int target_col, game_state *state) {
         piece captured_piece = board[captured_pos.row][captured_pos.col];
         bool is_capture = captured_piece.type != EMPTY;
         move_piece(board, *sel, (board_pos){target_row, target_col});
+        // auto-promote to queen when a pawn reaches the back rank
+        if (moving_piece.type == PAWN &&
+            (target_row == 0 || target_row == 7)) {
+            board[target_row][target_col].type = QUEEN;
+            TraceLog(LOG_INFO, "Pawn promoted to Queen at %c%d",
+                     'A' + target_col, 8 - target_row);
+        }
         start_move_animation(&current_anim, moving_piece, *sel,
                              (board_pos){target_row, target_col});
         TraceLog(LOG_DEBUG, "Moved piece to: %d, %d", target_row, target_col);
