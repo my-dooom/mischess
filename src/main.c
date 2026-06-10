@@ -296,6 +296,15 @@ int main(void) {
                 }
             }
         }
+        // R key resets the game at any time
+        if (IsKeyPressed(KEY_R)) {
+            initialize_board(board);
+            init_game_state(&game);
+            update_fen_table(board);
+            update_capture_matrices(board);
+            TraceLog(LOG_INFO, "Game reset");
+        }
+
         BeginDrawing();
         ClearBackground((Color){0x40, 0x33, 0x53, 0xFF});
         update_animation(&current_anim);
@@ -305,6 +314,7 @@ int main(void) {
         draw_board_labels(tile_size, scale);
         draw_selection_highlight(scale, &game.current_selection);
         draw_possible_moves(&game.possible_moves, scale);
+        draw_ui(tile_size, scale, &game);
         EndDrawing();
     }
 

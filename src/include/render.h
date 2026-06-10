@@ -34,6 +34,7 @@ void initialize_render(const char *texture_path, Texture *tex_pattern,
                        tile *tiles);
 void draw_chessboard(tile *tiles, Texture *tex_pattern, float scale);
 void draw_board_labels(float tile_size, float scale);
+void draw_ui(float tile_size, float scale, const game_state *state);
 
 void start_move_animation(move_animation *anim, piece p, board_pos src,
                           board_pos dest);
