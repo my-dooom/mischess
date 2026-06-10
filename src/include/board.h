@@ -1,9 +1,7 @@
 #ifndef BOARD_H
 #define BOARD_H
 
-#include "raylib.h"
-
-//------------------------------------------------------------------------------------
+#include "raylib.h" //------------------------------------------------------------------------------------
 // DATA STRUCTURES
 //------------------------------------------------------------------------------------
 //// in board.h
@@ -32,15 +30,11 @@ typedef struct {
     color color;
     bool has_moved; // Indicates if the piece has moved, relevant for castling
                     // and pawn first move
-    char capture_matrix[8][8]; // [r][c] = 1 if enemy at (r,c) can capture this piece
-    char defence_matrix[8][8]; // [r][c] = 1 if friendly at (r,c) defends this piece
+    bool attacked_by[2]; // attacked_by[White/Black] = true if any piece of
+                         // that color can reach this square
 } piece;
 
 extern piece board[8][8];
-extern color current_turn;
-extern board_pos selected;
-extern board_pos en_passant_square;
-extern bool is_in_check[2]; // is_in_check[White] and is_in_check[Black]
 
 void initialize_board(piece (*board)[8]);
 

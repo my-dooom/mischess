@@ -149,3 +149,39 @@ void draw_chessboard(tile *tiles, Texture *tex_pattern, float scale) {
         }
     }
 }
+
+void draw_ui(float tile_size, float scale, const game_state *state) {
+    float board_px = tile_size * scale * 8;
+    int font_size = (int)(tile_size * scale * 0.35f);
+    int y = (int)board_px + 8;
+
+    if (state->game_over) {
+        // banner is drawn centered over the board
+        const char *msg = "Game over";
+        color side = turn_to_color(state->turn);
+        if (state->is_in_check[side])
+            msg = side == White ? "Checkmate! Black wins" : "Checkmate! White wins";
+        else
+            msg = "Stalemate! Draw";
+        int bw = MeasureText(msg, font_size + 4);
+        int bx = ((int)board_px - bw) / 2;
+        DrawRectangle(bx - 8, y - 4, bw + 16, font_size + 12,
+                      (Color){0, 0, 0, 180});
+        DrawText(msg, bx, y, font_size + 4, RED);
+        DrawText("Press R to restart", bx, y + font_size + 8,
+                 font_size - 4, LIGHTGRAY);
+        return;
+    }
+
+    // whose turn
+    const char *turn_msg = state->turn ? "Black to move" : "White to move";
+    DrawText(turn_msg, 8, y, font_size, WHITE);
+
+    // check indicator
+    color side = turn_to_color(state->turn);
+    if (state->is_in_check[side]) {
+        const char *chk = "CHECK";
+        int cx = (int)board_px - MeasureText(chk, font_size + 2) - 8;
+        DrawText(chk, cx, y, font_size + 2, ORANGE);
+    }
+}

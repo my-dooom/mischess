@@ -53,3 +53,25 @@ set(CPACK_PACKAGE_EXECUTABLES "${PROJECT_NAME};mischess")
 set(CPACK_GENERATOR "ZIP")
 
 include(CPack)
+
+# ------------------------------------------------------------
+# Test target (no raylib, no window -- pure logic)
+# ------------------------------------------------------------
+enable_testing()
+
+set(TEST_SOURCES
+    tests/test_rules.c
+    src/board.c
+    src/game.c
+    src/fen.c
+)
+
+add_executable(chess_tests ${TEST_SOURCES})
+
+target_include_directories(chess_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/tests   # raylib.h stub lives here, shadows the real one
+    ${CMAKE_SOURCE_DIR}/src/include
+)
+
+# tests/raylib_stub.h shadows the real raylib.h so no library is needed
+add_test(NAME chess_rules COMMAND chess_tests)
