@@ -165,6 +165,9 @@ static void handle_input(int target_row, int target_col, game_state *state) {
                                      : (board_pos){target_row, target_col};
         piece captured_piece = board[captured_pos.row][captured_pos.col];
         bool is_capture = captured_piece.type != EMPTY;
+        if (is_en_passant)
+            TraceLog(LOG_INFO, "En passant capture at %c%d",
+                     'A' + target_col, 8 - sel->row);
         move_piece(board, *sel, (board_pos){target_row, target_col});
         // auto-promote to queen when a pawn reaches the back rank
         if (moving_piece.type == PAWN &&
