@@ -29,6 +29,7 @@ typedef struct {
     bool can_castle_long[2];
     size_t move_count;
     size_t halfmove_clock;
+    bool game_over;
 
 } game_state;
 

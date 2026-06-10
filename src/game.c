@@ -16,6 +16,7 @@ void init_game_state(game_state *state) {
     state->can_castle_long[Black] = true;
     state->move_count = 0;
     state->halfmove_clock = 0;
+    state->game_over = false;
 }
 
 static void generate_pawn_moves(piece board[8][8], board_pos pos,
