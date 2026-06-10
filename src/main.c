@@ -156,6 +156,8 @@ static void handle_input(int target_row, int target_col, game_state *state) {
         }
         state->can_castle_short[moving_color] = false;
         state->can_castle_long[moving_color] = false;
+        update_fen_table(board);
+        update_capture_matrices(board);
         state->halfmove_clock++;
         state->move_count++;
     } else {
@@ -172,7 +174,6 @@ static void handle_input(int target_row, int target_col, game_state *state) {
                              (board_pos){target_row, target_col});
         TraceLog(LOG_DEBUG, "Moved piece to: %d, %d", target_row, target_col);
         update_fen_table(board);
-        update_capture_matrices(board);
         possible_moves piece_moves = {0};
         check_possible_moves(board, (board_pos){target_row, target_col},
                              &piece_moves);
@@ -198,6 +199,13 @@ static void handle_input(int target_row, int target_col, game_state *state) {
             (board_pos){(sel->row + target_row) / 2, target_col};
     }
     state->turn = !state->turn;
+    update_capture_matrices(board);
+    compute_check_status(board, state);
+    color next = turn_to_color(state->turn);
+    if (state->is_in_check[next]) {
+        TraceLog(LOG_WARNING, "%s king is in check",
+                 next == White ? "White" : "Black");
+    }
     clear_selection(sel, moves);
 }
 

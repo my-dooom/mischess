@@ -18,6 +18,8 @@ void init_game_state(game_state *state) {
     state->move_count = 0;
     state->halfmove_clock = 0;
     state->game_over = false;
+    state->is_in_check[White] = false;
+    state->is_in_check[Black] = false;
 }
 
 static void generate_pawn_moves(piece board[8][8], board_pos pos,
@@ -373,6 +375,18 @@ void update_capture_matrices(piece board[8][8]) {
     }
 
     free(piece_moves.pos);
+}
+
+void compute_check_status(piece board[8][8], game_state *state) {
+    for (int c = 0; c < 2; c++) {
+        board_pos kp = find_king_pos(board, (color)c);
+        if (kp.row < 0) {
+            state->is_in_check[c] = false;
+            continue;
+        }
+        color opp = (c == White) ? Black : White;
+        state->is_in_check[c] = board[kp.row][kp.col].attacked_by[opp];
+    }
 }
 
 int long_castle(piece board[8][8], color player_color) {

@@ -30,6 +30,7 @@ typedef struct {
     size_t move_count;
     size_t halfmove_clock;
     bool game_over;
+    bool is_in_check[2]; // is_in_check[White/Black]
 
 } game_state;
 
@@ -52,4 +53,5 @@ int long_castle(piece board[8][8], color player_color);
 int short_castle(piece board[8][8], color player_color);
 
 void update_capture_matrices(piece board[8][8]);
+void compute_check_status(piece board[8][8], game_state *state);
 #endif // GAME_H
