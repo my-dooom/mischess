@@ -27,21 +27,21 @@ void print_available_captures(int target_row, int target_col,
     }
 }
 bool check_stalemate(color player_color) {
-    // Check if the player has any legal moves left
+    // use legal moves so pieces pinned to the king are not counted
     for (int row = 0; row < 8; row++) {
         for (int col = 0; col < 8; col++) {
-            if (board[row][col].color == player_color) {
-                possible_moves moves = {0};
-                check_possible_moves(board, (board_pos){row, col}, &moves);
-                if (moves.count > 0) {
-                    free(moves.pos);
-                    return false; // Found a legal move, not stalemate
-                }
-                free(moves.pos);
-            }
+            if (board[row][col].type == EMPTY ||
+                board[row][col].color != player_color)
+                continue;
+            possible_moves moves = {0};
+            generate_legal_moves(board, (board_pos){row, col}, &moves);
+            bool has_move = moves.count > 0;
+            free(moves.pos);
+            if (has_move)
+                return false;
         }
     }
-    return true; // No legal moves found, stalemate
+    return true;
 }
 static bool is_move_in_list(int target_row, int target_col,
                             const possible_moves *moves) {
@@ -279,13 +279,22 @@ int main(void) {
         target_col = -1;
         convert_mouse_position_to_board_coordinates(
             mouse_position, tile_size * scale, &target_row, &target_col);
-        handle_input(target_row, target_col, &game);
+        if (!game.game_over) {
+            handle_input(target_row, target_col, &game);
+        }
 
-        if (check_stalemate(turn_to_color(game.turn))) {
-            TraceLog(LOG_INFO, "Stalemate detected for color %d",
-                     turn_to_color(game.turn));
-            TraceLog(LOG_INFO, "Game over! DRAW");
-            return -1;
+        // check for checkmate / stalemate after every move
+        if (!game.game_over) {
+            color side = turn_to_color(game.turn);
+            if (check_stalemate(side)) {
+                game.game_over = true;
+                if (game.is_in_check[side]) {
+                    TraceLog(LOG_WARNING, "Checkmate! %s wins",
+                             side == White ? "Black" : "White");
+                } else {
+                    TraceLog(LOG_WARNING, "Stalemate! Draw");
+                }
+            }
         }
         BeginDrawing();
         ClearBackground((Color){0x40, 0x33, 0x53, 0xFF});
