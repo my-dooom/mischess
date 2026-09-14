@@ -21,7 +21,10 @@ static Vector2 square_center(board_pos p, float ts) {
     return (Vector2){p.col * ts + ts / 2, p.row * ts + ts / 2};
 }
 
-static void draw_arrow(board_pos src, board_pos dest, float ts, Color col) {
+// thick scales the shaft and head; > 1 drawn first in a dark colour gives
+// the arrow an outline
+static void draw_arrow(board_pos src, board_pos dest, float ts, Color col,
+                       float thick) {
     Vector2 a = square_center(src, ts), b = square_center(dest, ts);
     Vector2 d = {b.x - a.x, b.y - a.y};
     float len = sqrtf(d.x * d.x + d.y * d.y);
@@ -29,8 +32,8 @@ static void draw_arrow(board_pos src, board_pos dest, float ts, Color col) {
         return;
     d.x /= len;
     d.y /= len;
-    float head = ts * 0.35f;
-    float shaft_w = ts * 0.14f;
+    float head = ts * 0.35f * thick;
+    float shaft_w = ts * 0.14f * thick;
     // start a little out of the source square center, stop before the head
     Vector2 start = {a.x + d.x * ts * 0.2f, a.y + d.y * ts * 0.2f};
     Vector2 tip = {b.x - d.x * ts * 0.1f, b.y - d.y * ts * 0.1f};
@@ -48,6 +51,27 @@ static bool arrow_for_move(const char *uci, board_pos *src, board_pos *dest) {
     return uci && uci[0] && uci_move_to_squares(uci, src, dest, &promo);
 }
 
+// a move the player is meant to read at a glance: both squares tinted, a
+// thick arrow with a dark outline so it stands out on either square colour
+static void draw_move_highlight(board_pos src, board_pos dest, float ts,
+                                Color col) {
+    DrawRectangle((int)(src.col * ts), (int)(src.row * ts), (int)ts, (int)ts,
+                  Fade(col, 0.35f));
+    DrawRectangleLinesEx((Rectangle){dest.col * ts, dest.row * ts, ts, ts},
+                         4.0f, col);
+    draw_arrow(src, dest, ts, (Color){0, 0, 0, 160}, 1.3f);
+    draw_arrow(src, dest, ts, col, 1.0f);
+}
+
+// SAN of the first move of a UCI line from the live position ("Nf3")
+static void first_move_san(const char *pv, char *out, size_t cap) {
+    char numbered[COACH_LINE_MAX];
+    uci_line_to_san_current(pv, 1, numbered, sizeof(numbered));
+    // strip the "3." / "3..." prefix
+    const char *sp = strchr(numbered, ' ');
+    snprintf(out, cap, "%s", sp ? sp + 1 : numbered);
+}
+
 void draw_coach_overlay(float scale, const coach *c, const game_state *state) {
     if (!coach_active(c))
         return;
@@ -57,19 +81,21 @@ void draw_coach_overlay(float scale, const coach *c, const game_state *state) {
 
     if (c->show_threat && c->threat.valid && coach_is_human_turn(c, state) &&
         arrow_for_move(c->threat.move_uci, &src, &dest)) {
-        draw_arrow(src, dest, ts, Fade(RED, 0.55f));
+        draw_arrow(src, dest, ts, (Color){0, 0, 0, 120}, 1.3f);
+        draw_arrow(src, dest, ts, Fade(RED, 0.7f), 1.0f);
     }
 
-    if (c->show_candidates && c->phase == COACH_ANALYZE) {
+    if (c->show_candidates && c->hint_frozen && coach_is_human_turn(c, state)) {
         for (int i = COACH_CANDIDATES - 1; i >= 0; i--) {
-            if (!c->candidates_valid[i])
+            if (!c->hint_valid[i])
                 continue;
-            if (!arrow_for_move(c->candidates[i].first_move, &src, &dest))
+            if (!arrow_for_move(c->hint_lines[i].first_move, &src, &dest))
                 continue;
-            float alpha = i == 0 ? 0.75f : (i == 1 ? 0.5f : 0.35f);
-            draw_arrow(src, dest, ts, Fade(SKYBLUE, alpha));
-            int cp = uci_score_cp_for_white(&c->candidates[i],
-                                            c->analysis_black_to_move);
+            float alpha = i == 0 ? 0.85f : (i == 1 ? 0.6f : 0.45f);
+            draw_arrow(src, dest, ts, (Color){0, 0, 0, 140}, 1.3f);
+            draw_arrow(src, dest, ts, Fade(SKYBLUE, alpha), 1.0f);
+            int cp = uci_score_cp_for_white(&c->hint_lines[i],
+                                            c->hint_black_to_move);
             char txt[16];
             uci_format_score(c->human_color == White ? cp : -cp, txt, sizeof(txt));
             Vector2 p = square_center(dest, ts);
@@ -78,8 +104,9 @@ void draw_coach_overlay(float scale, const coach *c, const game_state *state) {
                           font + 4, (Color){0, 0, 0, 170});
             DrawText(txt, (int)p.x - w / 2, (int)p.y - font / 2, font, WHITE);
         }
-    } else if (c->show_hint && arrow_for_move(coach_hint_move(c), &src, &dest)) {
-        draw_arrow(src, dest, ts, Fade(LIME, 0.75f));
+    } else if (c->show_hint && coach_is_human_turn(c, state) &&
+               arrow_for_move(coach_hint_move(c), &src, &dest)) {
+        draw_move_highlight(src, dest, ts, LIME);
     }
 }
 
@@ -215,24 +242,41 @@ int draw_coach_panel(int x0, int y0, int w, int h, const coach *c,
         y += 6;
     }
 
-    // hint / candidate lines
-    if (c->show_candidates && c->phase == COACH_ANALYZE) {
+    // hint / candidate lines, from the frozen snapshot
+    bool want_lines = (c->show_hint || c->show_candidates) &&
+                      coach_is_human_turn(c, state) && !state->game_over;
+    if (want_lines && !c->hint_frozen) {
+        DrawText("Hint: analysing...", tx, y, font, LIME);
+        y += font + 6;
+    } else if (c->show_candidates && c->hint_frozen) {
+        DrawText("Candidate moves", tx, y, font, SKYBLUE);
+        y += font + 4;
         for (int i = 0; i < COACH_CANDIDATES; i++) {
-            if (!c->candidates_valid[i])
+            if (!c->hint_valid[i])
                 continue;
-            char line[COACH_LINE_MAX], sc[16];
-            uci_line_to_san_current(c->candidates[i].pv, 4, line, sizeof(line));
-            int cp = uci_score_cp_for_white(&c->candidates[i],
-                                            c->analysis_black_to_move);
+            char mv[SAN_MAX + 8], line[COACH_LINE_MAX], sc[16];
+            first_move_san(c->hint_lines[i].pv, mv, sizeof(mv));
+            uci_line_to_san_current(c->hint_lines[i].pv, 4, line, sizeof(line));
+            int cp = uci_score_cp_for_white(&c->hint_lines[i],
+                                            c->hint_black_to_move);
             uci_format_score(c->human_color == White ? cp : -cp, sc, sizeof(sc));
-            y = draw_wrapped(TextFormat("%d. %s  %s", i + 1, sc, line), tx, y,
-                             tw, small, i == 0 ? WHITE : LIGHTGRAY);
+            // the move itself big, the eval next to it, the line underneath
+            DrawText(TextFormat("%d.  %s", i + 1, mv), tx, y, font,
+                     i == 0 ? WHITE : LIGHTGRAY);
+            int mw = MeasureText(TextFormat("%d.  %s", i + 1, mv), font);
+            DrawText(sc, tx + mw + 12, y + (font - small), small, GRAY);
+            y += font + 2;
+            y = draw_wrapped(line, tx + 24, y, tw - 24, small, GRAY);
+            y += 4;
         }
-        y += 6;
-    } else if (c->show_hint && coach_hint_move(c)) {
-        char line[COACH_LINE_MAX];
-        uci_line_to_san_current(c->candidates[0].pv, 4, line, sizeof(line));
-        y = draw_wrapped(TextFormat("Hint: %s", line), tx, y, tw, small, LIME);
+        y += 4;
+    } else if (c->show_hint && c->hint_frozen && coach_hint_move(c)) {
+        char mv[SAN_MAX + 8], line[COACH_LINE_MAX];
+        first_move_san(c->hint_lines[0].pv, mv, sizeof(mv));
+        uci_line_to_san_current(c->hint_lines[0].pv, 4, line, sizeof(line));
+        DrawText(TextFormat("Hint: %s", mv), tx, y, font + 6, LIME);
+        y += font + 10;
+        y = draw_wrapped(line, tx + 24, y, tw - 24, small, GRAY);
         y += 6;
     }
 

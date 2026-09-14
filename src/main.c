@@ -230,11 +230,16 @@ int main(int argc, char **argv) {
             // coach toggles
             if (IsKeyPressed(KEY_H)) {
                 the_coach.show_hint = !the_coach.show_hint;
-                if (the_coach.show_hint)
+                if (the_coach.show_hint) {
                     the_coach.hints_used++;
+                    coach_request_hints(&the_coach);
+                }
             }
-            if (IsKeyPressed(KEY_C))
+            if (IsKeyPressed(KEY_C)) {
                 the_coach.show_candidates = !the_coach.show_candidates;
+                if (the_coach.show_candidates)
+                    coach_request_hints(&the_coach);
+            }
             if (IsKeyPressed(KEY_T))
                 the_coach.show_threat = !the_coach.show_threat;
             if (IsKeyPressed(KEY_S) && !current_anim.active)

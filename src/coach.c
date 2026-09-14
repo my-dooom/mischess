@@ -14,6 +14,10 @@ coach the_coach = {0};
 #define EVAL_MS 400
 #define PLAY_MS 700
 
+// analysis depth a hint must reach before it is shown; Stockfish gets there
+// in well under a second and the move rarely changes after it
+#define HINT_MIN_DEPTH 16
+
 #define ELO_MIN 1320
 #define ELO_MAX 2800
 #define ELO_START 1400
@@ -65,10 +69,24 @@ static int cp_white_to_human(const coach *c, int cp_white) {
 // starting searches
 //------------------------------------------------------------------------------
 
+static void freeze_hints(coach *c) {
+    memcpy(c->hint_lines, c->candidates, sizeof(c->hint_lines));
+    memcpy(c->hint_valid, c->candidates_valid, sizeof(c->hint_valid));
+    c->hint_black_to_move = c->analysis_black_to_move;
+    c->hint_frozen = true;
+}
+
+static bool analysis_deep_enough(const coach *c) {
+    return c->phase == COACH_ANALYZE && c->candidates_valid[0] &&
+           c->candidates[0].depth >= HINT_MIN_DEPTH;
+}
+
 static void begin_analysis(coach *c, piece board[8][8], const game_state *state) {
     char fen[LONGEST_FEN];
     current_fen(board, state, fen, sizeof(fen));
     memset(c->candidates_valid, 0, sizeof(c->candidates_valid));
+    memset(c->hint_valid, 0, sizeof(c->hint_valid));
+    c->hint_frozen = false;
     c->analysis_black_to_move = state->turn;
     send(c, "setoption name UCI_LimitStrength value false");
     sendf(c, "setoption name MultiPV value %d", COACH_CANDIDATES);
@@ -274,6 +292,10 @@ static void handle_line(coach *c, const char *line, piece board[8][8],
                     c->eval_cp_white =
                         uci_score_cp_for_white(&info, c->analysis_black_to_move);
             }
+            // a requested hint waits for a deep enough line, then locks
+            if (!c->hint_frozen && (c->show_hint || c->show_candidates) &&
+                analysis_deep_enough(c))
+                freeze_hints(c);
         }
         // a bestmove here only arrives after "stop", handled in STOPPING
         break;
@@ -530,8 +552,13 @@ bool coach_take_engine_move(coach *c, board_pos *src, board_pos *dest) {
     return true;
 }
 
+void coach_request_hints(coach *c) {
+    if (!c->hint_frozen && analysis_deep_enough(c))
+        freeze_hints(c);
+}
+
 const char *coach_hint_move(const coach *c) {
-    if (c->phase == COACH_ANALYZE && c->candidates_valid[0])
-        return c->candidates[0].first_move;
+    if (c->hint_frozen && c->hint_valid[0])
+        return c->hint_lines[0].first_move;
     return NULL;
 }

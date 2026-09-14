@@ -89,6 +89,14 @@ typedef struct {
     bool show_hint;
     bool show_candidates;
     bool show_threat;
+
+    // The hint and candidate lines shown to the player are a frozen copy of
+    // the analysis, taken once it is deep enough and kept until the position
+    // changes, so what is on screen does not keep shifting under the eye.
+    uci_info hint_lines[COACH_CANDIDATES];
+    bool hint_valid[COACH_CANDIDATES];
+    bool hint_frozen;
+    bool hint_black_to_move;
     bool needs_restart; // position changed under a running search
 
     // set when the engine's reply has been applied; main animates it
@@ -124,7 +132,12 @@ bool coach_is_human_turn(const coach *c, const game_state *state);
 // Returns true once per engine move, handing out its squares.
 bool coach_take_engine_move(coach *c, board_pos *src, board_pos *dest);
 
-// "e2e4" of the current best move, or NULL when unknown
+// Call when the player asks for a hint or the candidate lines: takes the
+// snapshot right away if the analysis is already deep enough, otherwise it
+// is taken as soon as it is.
+void coach_request_hints(coach *c);
+
+// "e2e4" of the frozen hint move, or NULL while no snapshot exists
 const char *coach_hint_move(const coach *c);
 
 #endif // COACH_H
