@@ -22,6 +22,15 @@ extern move_animation current_anim;
 
 // multiplier on every UI font size, changed with + / - at runtime
 extern float ui_text_scale;
+// the move list is optional reading; M shows it
+extern bool ui_show_moves;
+
+// shared palette
+#define UI_BG        (Color){0x24, 0x1e, 0x33, 0xff}
+#define UI_PANEL     (Color){0x1c, 0x18, 0x28, 0xff}
+#define UI_CARD      (Color){0x2f, 0x29, 0x42, 0xff}
+#define UI_TEXT      (Color){0xee, 0xea, 0xf6, 0xff}
+#define UI_MUTED     (Color){0xa3, 0x9c, 0xb8, 0xff}
 
 // font size for a nominal pixel height, never below the readable minimum
 static inline int ui_font(float px) {
@@ -51,8 +60,10 @@ void initialize_render(const unsigned char *png, int png_len,
 void draw_chessboard(tile *tiles, Texture *tex_pattern, float scale);
 void draw_board_labels(float tile_size, float scale);
 void draw_ui(float tile_size, float scale, const game_state *state);
-void draw_move_list(float tile_size, float scale, int screen_w, int screen_h,
-                    int y0, const game_state *state);
+// returns the y below the list (y0 when hidden)
+int draw_move_list(int x0, int y0, int w, int max_y, const game_state *state);
+// frame around the board
+void draw_board_frame(float scale);
 
 // promotion picker: drawn over the board while state->promotion_pending;
 // promotion_picker_hit returns the index into promotion_choices under the

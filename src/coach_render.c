@@ -116,23 +116,30 @@ static float win_prob(int cp) {
     return 1.0f / (1.0f + powf(10.0f, -cp / 400.0f));
 }
 
-static void draw_eval_bar(int x, int y, int w, int h, int cp_white,
-                          int font) {
-    float p = win_prob(cp_white);
-    int white_h = (int)(h * p);
-    DrawRectangle(x, y, w, h, (Color){0x22, 0x1c, 0x2e, 0xff});
-    DrawRectangle(x, y + h - white_h, w, white_h, RAYWHITE);
-    DrawRectangleLines(x, y, w, h, GRAY);
-    // midline marks the equal position
-    DrawLine(x, y + h / 2, x + w, y + h / 2, (Color){255, 0, 0, 120});
-    char txt[16];
-    uci_format_score(cp_white, txt, sizeof(txt));
-    int tw = MeasureText(txt, font);
-    DrawText(txt, x + (w - tw) / 2, y + h + 4, font, LIGHTGRAY);
-}
+//------------------------------------------------------------------------------
+// side panel: a column of cards, each with a coloured stripe and a title.
+// Every section is drawn twice: a measuring pass sizes the card, the second
+// pass paints it. That keeps the card backgrounds behind wrapped text
+// without knowing the heights up front.
+//------------------------------------------------------------------------------
 
-static int draw_wrapped(const char *text, int x, int y, int max_w, int font,
-                        Color col) {
+typedef struct {
+    int x, w;       // content column
+    int font, small;
+    bool draw;      // false = measure only
+} panel_ctx;
+
+static const Color CARD_BG = {0x2f, 0x29, 0x42, 0xff};
+static const Color TEXT_MAIN = {0xee, 0xea, 0xf6, 0xff};
+static const Color TEXT_MUTED = {0xa3, 0x9c, 0xb8, 0xff};
+static const Color ACCENT_PLAN = {0xc9, 0x9d, 0xf5, 0xff};
+static const Color ACCENT_HINT = {0x8b, 0xe0, 0x8a, 0xff};
+static const Color ACCENT_LINES = {0x84, 0xc5, 0xf5, 0xff};
+static const Color ACCENT_THREAT = {0xf0, 0x7a, 0x6e, 0xff};
+static const Color ACCENT_GOLD = {0xf2, 0xc9, 0x6b, 0xff};
+
+static int wrap_text(const char *text, int x, int y, int max_w, int font,
+                     Color col, bool draw) {
     // greedy word wrap, returns the y after the last line
     char line[256] = "";
     const char *p = text;
@@ -144,7 +151,7 @@ static int draw_wrapped(const char *text, int x, int y, int max_w, int font,
         char trial[256];
         snprintf(trial, sizeof(trial), "%s%s%s", line, line[0] ? " " : "", word);
         if (line[0] && MeasureText(trial, font) > max_w) {
-            DrawText(line, x, y, font, col);
+            if (draw) DrawText(line, x, y, font, col);
             y += font + 4;
             snprintf(line, sizeof(line), "%s", word);
         } else {
@@ -154,174 +161,255 @@ static int draw_wrapped(const char *text, int x, int y, int max_w, int font,
         while (*p == ' ') p++;
     }
     if (line[0]) {
-        DrawText(line, x, y, font, col);
+        if (draw) DrawText(line, x, y, font, col);
         y += font + 4;
     }
     return y;
 }
 
+static int text(panel_ctx *p, int y, const char *txt, int font, Color col) {
+    if (p->draw) DrawText(txt, p->x, y, font, col);
+    return y + font + 4;
+}
+
+static int para(panel_ctx *p, int y, const char *txt, int indent, Color col) {
+    return wrap_text(txt, p->x + indent, y, p->w - indent, p->small, col,
+                     p->draw);
+}
+
+typedef int (*card_body)(panel_ctx *p, int y, const coach *c,
+                         const game_state *state);
+
+// a rounded card with a stripe on the left and a title; body drawn inside
+static int card(panel_ctx *p, int y, const char *title, Color accent,
+                card_body body, const coach *c, const game_state *state) {
+    const int pad = 10, stripe = 4, gap = 10;
+    panel_ctx inner = *p;
+    inner.x = p->x + stripe + pad;
+    inner.w = p->w - stripe - 2 * pad;
+
+    // measure
+    inner.draw = false;
+    int cy = y + pad;
+    if (title) cy = text(&inner, cy, title, p->small, accent);
+    cy = body(&inner, cy, c, state);
+    int h = cy - y + pad - 4;
+
+    if (p->draw) {
+        Rectangle r = {(float)p->x, (float)y, (float)p->w, (float)h};
+        DrawRectangleRounded(r, 0.12f, 6, CARD_BG);
+        DrawRectangleRounded((Rectangle){r.x, r.y, (float)stripe + 6, r.height},
+                             0.5f, 6, accent);
+        DrawRectangle(p->x + stripe, y, 6, h, CARD_BG);
+        inner.draw = true;
+        cy = y + pad;
+        if (title) cy = text(&inner, cy, title, p->small, accent);
+        body(&inner, cy, c, state);
+    }
+    return y + h + gap;
+}
+
+//------------------------------------------------------------------------------
+// sections
+//------------------------------------------------------------------------------
+
+static int body_feedback(panel_ctx *p, int y, const coach *c,
+                         const game_state *state) {
+    (void)state;
+    const coach_feedback *f = &c->feedback;
+    Color gc = grade_color(f->grade);
+    char head[64];
+    snprintf(head, sizeof(head), "%s   %s", f->played_san, uci_grade_name(f->grade));
+    y = text(p, y, head, p->font, gc);
+    char before[16], after[16];
+    uci_format_score(f->eval_before_cp, before, sizeof(before));
+    uci_format_score(f->eval_after_cp, after, sizeof(after));
+    y = text(p, y, TextFormat("%s  to  %s   (lost %d cp)", before, after, f->cp_loss),
+             p->small, TEXT_MUTED);
+    if (f->best_san[0]) {
+        y += 2;
+        y = text(p, y, TextFormat("Better: %s", f->best_san), p->font, TEXT_MAIN);
+        y = para(p, y, f->best_line, 16, TEXT_MUTED);
+    }
+    return y;
+}
+
+static int body_threat(panel_ctx *p, int y, const coach *c,
+                       const game_state *state) {
+    (void)state;
+    char sc[16];
+    uci_format_score(c->threat.cp_for_human, sc, sizeof(sc));
+    y = text(p, y, TextFormat("%s   %s", c->threat.san, sc), p->font, TEXT_MAIN);
+    const char *why = c->threat.cp_for_human < -150 ? "serious: deal with it now"
+                      : c->threat.cp_for_human < -50 ? "worth preventing"
+                                                      : "not dangerous yet";
+    return para(p, y, TextFormat("If you passed, the opponent plays this: %s.", why),
+                0, TEXT_MUTED);
+}
+
+static int body_plan(panel_ctx *p, int y, const coach *c,
+                     const game_state *state) {
+    (void)c; (void)state;
+    strategist_state st = strategist_get_state();
+    char t[STRATEGIST_ANSWER_MAX];
+    if (st == STRATEGIST_OFF)
+        return para(p, y, strategist_last_error(), 0, TEXT_MUTED);
+    if (st == STRATEGIST_LOADING)
+        return text(p, y, "loading model...", p->small, TEXT_MUTED);
+    if (strategist_answer(t, sizeof(t)))
+        return para(p, y, t, 0, TEXT_MAIN);
+    if (st == STRATEGIST_WRITING)
+        return text(p, y, "thinking...", p->small, TEXT_MUTED);
+    return text(p, y, "waiting for the opponent's next move", p->small, TEXT_MUTED);
+}
+
+static int body_hint(panel_ctx *p, int y, const coach *c,
+                     const game_state *state) {
+    (void)state;
+    if (!c->hint_frozen)
+        return text(p, y, "analysing...", p->small, TEXT_MUTED);
+    char mv[SAN_MAX + 8], line[COACH_LINE_MAX];
+    first_move_san(c->hint_lines[0].pv, mv, sizeof(mv));
+    uci_line_to_san_current(c->hint_lines[0].pv, 4, line, sizeof(line));
+    y = text(p, y, mv, p->font + 8, ACCENT_HINT);
+    return para(p, y, line, 16, TEXT_MUTED);
+}
+
+static int body_candidates(panel_ctx *p, int y, const coach *c,
+                           const game_state *state) {
+    (void)state;
+    if (!c->hint_frozen)
+        return text(p, y, "analysing...", p->small, TEXT_MUTED);
+    for (int i = 0; i < COACH_CANDIDATES; i++) {
+        if (!c->hint_valid[i])
+            continue;
+        char mv[SAN_MAX + 8], line[COACH_LINE_MAX], sc[16];
+        first_move_san(c->hint_lines[i].pv, mv, sizeof(mv));
+        uci_line_to_san_current(c->hint_lines[i].pv, 4, line, sizeof(line));
+        int cp = uci_score_cp_for_white(&c->hint_lines[i], c->hint_black_to_move);
+        uci_format_score(c->human_color == White ? cp : -cp, sc, sizeof(sc));
+        const char *head = TextFormat("%d.  %s", i + 1, mv);
+        if (p->draw) {
+            DrawText(head, p->x, y, p->font, i == 0 ? TEXT_MAIN : TEXT_MUTED);
+            DrawText(sc, p->x + MeasureText(head, p->font) + 12,
+                     y + (p->font - p->small), p->small, TEXT_MUTED);
+        }
+        y += p->font + 2;
+        y = para(p, y, line, 24, TEXT_MUTED);
+        y += 2;
+    }
+    return y;
+}
+
+static int body_summary(panel_ctx *p, int y, const coach *c,
+                        const game_state *state) {
+    (void)state;
+    for (int g = 0; g < GRADE_COUNT; g++) {
+        const char *row = TextFormat("%-12s %d", uci_grade_name((move_grade)g),
+                                     c->grade_counts[g]);
+        y = text(p, y, row, p->small, grade_color((move_grade)g));
+    }
+    return text(p, y, TextFormat("avg loss %d cp/move, %d hints",
+                                 c->total_cp_loss / c->moves_graded, c->hints_used),
+                p->small, TEXT_MUTED);
+}
+
+// a horizontal eval bar: white share from the left, score printed on top
+static void draw_eval_bar(int x, int y, int w, int h, int cp_white, int font) {
+    float p = win_prob(cp_white);
+    int white_w = (int)(w * p);
+    Rectangle r = {(float)x, (float)y, (float)w, (float)h};
+    DrawRectangleRounded(r, 0.5f, 6, (Color){0x1a, 0x16, 0x26, 0xff});
+    if (white_w > 0)
+        DrawRectangleRounded((Rectangle){r.x, r.y, (float)white_w, r.height},
+                             0.5f, 6, RAYWHITE);
+    DrawRectangle(x + w / 2 - 1, y, 2, h, (Color){0xf0, 0x7a, 0x6e, 0xa0});
+    char txt[16];
+    uci_format_score(cp_white, txt, sizeof(txt));
+    int tw = MeasureText(txt, font);
+    // print on whichever side has room, in the contrasting colour
+    bool on_white = p >= 0.5f;
+    int tx = on_white ? x + 8 : x + w - tw - 8;
+    DrawText(txt, tx, y + (h - font) / 2, font, on_white ? BLACK : RAYWHITE);
+}
+
 int draw_coach_panel(int x0, int y0, int w, int h, const coach *c,
                      const game_state *state) {
-    int font = ui_font(h * 0.028f);
-    if (font < 14) font = 14;
-    int small = font - 3;
+    panel_ctx p = {x0, w, ui_font(h * 0.028f), 0, true};
+    if (p.font < 14) p.font = 14;
+    p.small = p.font - 3;
     int y = y0;
 
+    // header: title, engine, strength
+    DrawText("COACH", x0, y, p.font + 6, TEXT_MAIN);
+    if (coach_active(c)) {
+        const char *sub = TextFormat("%s   Elo %d, plays %s", c->engine_name,
+                                     c->engine_elo,
+                                     c->human_color == White ? "Black" : "White");
+        DrawText(sub, x0 + MeasureText("COACH", p.font + 6) + 14,
+                 y + (p.font + 6 - p.small), p.small, TEXT_MUTED);
+    }
+    y += p.font + 14;
+
     if (!coach_active(c)) {
-        DrawText("Coach: off", x0, y, font, GRAY);
-        y += font + 4;
-        y = draw_wrapped(c->last_error, x0, y, w, small, GRAY);
+        y = wrap_text(c->last_error, x0, y, w, p.small, TEXT_MUTED, true);
         return y + 8;
     }
 
-    // eval bar down the left edge of the coach block
-    int bar_w = 30;
-    int bar_h = (int)(h * 0.36f);
-    draw_eval_bar(x0, y, bar_w, bar_h, c->eval_cp_white, small);
-    int tx = x0 + bar_w + 14;
-    int tw = w - bar_w - 14;
-
-    DrawText(TextFormat("Coach  |  %s", c->engine_name), tx, y, font, WHITE);
-    y += font + 4;
-    DrawText(TextFormat("Engine plays %s at Elo %d",
-                        c->human_color == White ? "Black" : "White",
-                        c->engine_elo),
-             tx, y, small, LIGHTGRAY);
-    y += small + 8;
-
-    // status line
+    // status with a coloured dot
     const char *status = "";
+    Color dot = TEXT_MUTED;
     switch (c->phase) {
-    case COACH_BOOT:        status = "starting engine..."; break;
-    case COACH_THREAT:      status = "looking for threats..."; break;
-    case COACH_ANALYZE:     status = "your move  (H hint, C lines, T threat, P plan)"; break;
+    case COACH_BOOT:        status = "starting engine"; break;
+    case COACH_THREAT:      status = "looking for threats"; dot = ACCENT_THREAT; break;
+    case COACH_ANALYZE:     status = "your move"; dot = ACCENT_HINT; break;
     case COACH_EVAL_BEFORE:
-    case COACH_EVAL_AFTER:  status = "grading your move..."; break;
-    case COACH_PLAY:        status = "engine is thinking..."; break;
-    case COACH_STOPPING:    status = "..."; break;
+    case COACH_EVAL_AFTER:  status = "grading your move"; dot = ACCENT_GOLD; break;
+    case COACH_PLAY:        status = "engine is thinking"; dot = ACCENT_LINES; break;
+    case COACH_IDLE:        status = state->game_over ? "game over" : ""; break;
     default: break;
     }
     if (status[0]) {
-        DrawText(status, tx, y, small, SKYBLUE);
-        y += small + 8;
+        DrawCircle(x0 + 6, y + p.small / 2 + 1, 5, dot);
+        DrawText(status, x0 + 18, y, p.small, TEXT_MAIN);
+        y += p.small + 10;
     }
 
-    // feedback on the last human move
-    if (c->feedback.valid) {
-        const coach_feedback *f = &c->feedback;
-        char head[64];
-        snprintf(head, sizeof(head), "%s  -  %s", f->played_san,
-                 uci_grade_name(f->grade));
-        DrawText(head, tx, y, font, grade_color(f->grade));
-        y += font + 4;
-        char before[16], after[16];
-        uci_format_score(f->eval_before_cp, before, sizeof(before));
-        uci_format_score(f->eval_after_cp, after, sizeof(after));
-        DrawText(TextFormat("eval %s -> %s  (lost %d cp)", before, after,
-                            f->cp_loss),
-                 tx, y, small, LIGHTGRAY);
-        y += small + 4;
-        if (f->best_san[0]) {
-            y = draw_wrapped(TextFormat("Better was %s: %s", f->best_san,
-                                        f->best_line),
-                             tx, y, tw, small, WHITE);
-        }
-        y += 6;
-    }
+    draw_eval_bar(x0, y, w, p.small + 8, c->eval_cp_white, p.small);
+    y += p.small + 8 + 14;
 
-    // what the opponent threatens right now
-    if (c->show_threat && c->threat.valid && coach_is_human_turn(c, state)) {
-        char sc[16];
-        uci_format_score(c->threat.cp_for_human, sc, sizeof(sc));
-        // only worth flagging when giving them the move would hurt
-        Color col = c->threat.cp_for_human < -150 ? RED
-                    : c->threat.cp_for_human < -50 ? ORANGE
-                                                    : LIGHTGRAY;
-        y = draw_wrapped(TextFormat("Threat: if you passed, %s (%s)",
-                                    c->threat.san, sc),
-                         tx, y, tw, small, col);
-        y += 6;
-    }
+    bool human_turn = coach_is_human_turn(c, state) && !state->game_over;
 
-    // what the opponent is up to, in words (P toggles)
-    if (c->show_plan) {
-        strategist_state st = strategist_get_state();
-        char text[STRATEGIST_ANSWER_MAX];
-        Color header_col = (Color){0xd8, 0xa8, 0xf0, 0xff};
-        if (st == STRATEGIST_OFF) {
-            y = draw_wrapped(TextFormat("Plan: %s", strategist_last_error()),
-                             tx, y, tw, small, GRAY);
-        } else if (st == STRATEGIST_LOADING) {
-            DrawText("Plan: loading model...", tx, y, small, GRAY);
-            y += small + 4;
-        } else if (strategist_answer(text, sizeof(text))) {
-            DrawText(st == STRATEGIST_WRITING ? "Opponent's plan (writing...)"
-                                              : "Opponent's plan",
-                     tx, y, font, header_col);
-            y += font + 4;
-            y = draw_wrapped(text, tx, y, tw, small, WHITE);
-        } else if (st == STRATEGIST_WRITING) {
-            DrawText("Opponent's plan: thinking...", tx, y, font, header_col);
-            y += font + 4;
-        }
-        y += 6;
-    }
+    if (c->feedback.valid)
+        y = card(&p, y, "YOUR LAST MOVE", grade_color(c->feedback.grade),
+                 body_feedback, c, state);
 
-    // hint / candidate lines, from the frozen snapshot
-    bool want_lines = (c->show_hint || c->show_candidates) &&
-                      coach_is_human_turn(c, state) && !state->game_over;
-    if (want_lines && !c->hint_frozen) {
-        DrawText("Hint: analysing...", tx, y, font, LIME);
-        y += font + 6;
-    } else if (c->show_candidates && c->hint_frozen) {
-        DrawText("Candidate moves", tx, y, font, SKYBLUE);
-        y += font + 4;
-        for (int i = 0; i < COACH_CANDIDATES; i++) {
-            if (!c->hint_valid[i])
-                continue;
-            char mv[SAN_MAX + 8], line[COACH_LINE_MAX], sc[16];
-            first_move_san(c->hint_lines[i].pv, mv, sizeof(mv));
-            uci_line_to_san_current(c->hint_lines[i].pv, 4, line, sizeof(line));
-            int cp = uci_score_cp_for_white(&c->hint_lines[i],
-                                            c->hint_black_to_move);
-            uci_format_score(c->human_color == White ? cp : -cp, sc, sizeof(sc));
-            // the move itself big, the eval next to it, the line underneath
-            DrawText(TextFormat("%d.  %s", i + 1, mv), tx, y, font,
-                     i == 0 ? WHITE : LIGHTGRAY);
-            int mw = MeasureText(TextFormat("%d.  %s", i + 1, mv), font);
-            DrawText(sc, tx + mw + 12, y + (font - small), small, GRAY);
-            y += font + 2;
-            y = draw_wrapped(line, tx + 24, y, tw - 24, small, GRAY);
-            y += 4;
-        }
-        y += 4;
-    } else if (c->show_hint && c->hint_frozen && coach_hint_move(c)) {
-        char mv[SAN_MAX + 8], line[COACH_LINE_MAX];
-        first_move_san(c->hint_lines[0].pv, mv, sizeof(mv));
-        uci_line_to_san_current(c->hint_lines[0].pv, 4, line, sizeof(line));
-        DrawText(TextFormat("Hint: %s", mv), tx, y, font + 6, LIME);
-        y += font + 10;
-        y = draw_wrapped(line, tx + 24, y, tw - 24, small, GRAY);
-        y += 6;
-    }
+    if (c->show_threat && c->threat.valid && human_turn)
+        y = card(&p, y, "THREAT", ACCENT_THREAT, body_threat, c, state);
 
-    // game summary
-    if (state->game_over && c->moves_graded > 0) {
-        y += 4;
-        DrawText("Your accuracy this game", tx, y, font, GOLD);
-        y += font + 4;
-        for (int g = 0; g < GRADE_COUNT; g++) {
-            DrawText(TextFormat("%-12s %d", uci_grade_name((move_grade)g),
-                                c->grade_counts[g]),
-                     tx, y, small, grade_color((move_grade)g));
-            y += small + 2;
-        }
-        DrawText(TextFormat("avg loss %d cp/move, %d hints",
-                            c->total_cp_loss / c->moves_graded, c->hints_used),
-                 tx, y, small, LIGHTGRAY);
-        y += small + 6;
-    }
+    if (c->show_plan)
+        y = card(&p, y, strategist_get_state() == STRATEGIST_WRITING
+                            ? "OPPONENT'S PLAN  (writing...)"
+                            : "OPPONENT'S PLAN",
+                 ACCENT_PLAN, body_plan, c, state);
 
-    int bottom = y0 + bar_h + small + 12;
-    return y > bottom ? y : bottom;
+    if (c->show_candidates && human_turn)
+        y = card(&p, y, "CANDIDATE MOVES", ACCENT_LINES, body_candidates, c, state);
+    else if (c->show_hint && human_turn)
+        y = card(&p, y, "HINT", ACCENT_HINT, body_hint, c, state);
+
+    if (state->game_over && c->moves_graded > 0)
+        y = card(&p, y, "YOUR ACCURACY THIS GAME", ACCENT_GOLD, body_summary, c,
+                 state);
+
+    return y;
+}
+
+// key legend, pinned to the bottom of the panel
+void draw_key_legend(int x0, int y_bottom, int w, int h) {
+    int small = ui_font(h * 0.028f) - 3;
+    if (small < 11) small = 11;
+    const char *keys = "H hint   C lines   T threat   P plan   M moves   U undo   R new   S sides   +/- text";
+    int height = wrap_text(keys, x0, 0, w, small, TEXT_MUTED, false);
+    wrap_text(keys, x0, y_bottom - height, w, small, TEXT_MUTED, true);
 }

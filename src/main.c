@@ -298,13 +298,16 @@ int main(int argc, char **argv) {
                 the_coach.show_threat = !the_coach.show_threat;
             if (IsKeyPressed(KEY_P))
                 the_coach.show_plan = !the_coach.show_plan;
+            if (IsKeyPressed(KEY_M))
+                ui_show_moves = !ui_show_moves;
             if (IsKeyPressed(KEY_S) && !current_anim.active)
                 coach_switch_sides(&the_coach, board, &game);
         }
 
         BeginDrawing();
-        ClearBackground((Color){0x40, 0x33, 0x53, 0xFF});
+        ClearBackground(UI_BG);
         update_animation(&current_anim);
+        draw_board_frame(scale);
         draw_chessboard(tiles, &tex_pattern, scale);
         draw_last_move_highlight(scale, &game);
         draw_check_highlight(scale, &game);
@@ -318,12 +321,14 @@ int main(int argc, char **argv) {
         {
             int px = (int)(tile_size * scale * 8) + PANEL_GAP;
             int pw = screenWidth - px - 16;
-            DrawRectangle(px - 12, 8, pw, screenHeight - 16,
-                          (Color){0, 0, 0, 90});
-            int y = draw_coach_panel(px, 16, pw - 12, screenHeight,
-                                     &the_coach, &game);
-            draw_move_list(tile_size, scale, screenWidth, screenHeight, y + 8,
-                           &game);
+            DrawRectangleRounded((Rectangle){(float)px - 14, 8, (float)pw,
+                                             (float)screenHeight - 16},
+                                 0.04f, 8, UI_PANEL);
+            int legend_h = ui_font(screenHeight * 0.028f) * 2 + 12;
+            int y = draw_coach_panel(px, 18, pw - 16, screenHeight, &the_coach,
+                                     &game);
+            draw_move_list(px, y, pw - 16, screenHeight - legend_h - 8, &game);
+            draw_key_legend(px, screenHeight - 10, pw - 16, screenHeight);
         }
         draw_promotion_picker(&tex_pattern, scale, &game);
         EndDrawing();

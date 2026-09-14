@@ -11,4 +11,7 @@ void draw_coach_overlay(float scale, const coach *c, const game_state *state);
 int draw_coach_panel(int x0, int y0, int w, int h, const coach *c,
                      const game_state *state);
 
+// key legend pinned to the bottom of the panel
+void draw_key_legend(int x0, int y_bottom, int w, int h);
+
 #endif // COACH_RENDER_H

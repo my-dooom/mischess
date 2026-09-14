@@ -60,6 +60,7 @@ Even a chess-trained model does not calculate; it narrates. The engine says what
 | T | Toggle threat display (coach) |
 | S | Switch sides with the engine (coach) |
 | P | Toggle the opponent's plan text (strategist) |
+| M | Show / hide the move list (hidden by default) |
 | + / - / 0 | Bigger / smaller / default text (the window itself is resizable; the board follows) |
 | Esc | Quit |
 

@@ -33,6 +33,7 @@ Rectangle selected_tile_rect = {48, 192, 16, 16};
 move_animation current_anim = {0};
 
 float ui_text_scale = 1.0f;
+bool ui_show_moves = false;
 
 const piece_type promotion_choices[PROMOTION_CHOICE_COUNT] = {QUEEN, ROOK,
                                                               BISHOP, KNIGHT};
@@ -179,68 +180,87 @@ void draw_check_highlight(float scale, const game_state *state) {
                               Fade(RED, 0.45f));
 }
 
+void draw_board_frame(float scale) {
+    float board_px = 16.0f * scale * 8;
+    DrawRectangleLinesEx((Rectangle){-2, -2, board_px + 4, board_px + 4}, 2.0f,
+                         (Color){0x12, 0x0e, 0x1c, 0xff});
+}
+
+// status card under the board: whose move, check, game result
 void draw_ui(float tile_size, float scale, const game_state *state) {
     float board_px = tile_size * scale * 8;
     int font_size = ui_font(tile_size * scale * 0.35f);
-    // the column labels sit directly under the board, status goes below them
-    int y = (int)board_px + font_size + 14;
+    int small = font_size - 6;
+    if (small < 10) small = 10;
+    // the column labels sit directly under the board, the card below them
+    int y = (int)board_px + font_size + 12;
+    int h = font_size + 16;
+    Rectangle card = {6, (float)y, board_px - 12, (float)h};
+    DrawRectangleRounded(card, 0.3f, 6, UI_CARD);
 
+    int ty = y + (h - font_size) / 2;
     if (state->game_over) {
         const char *msg = result_to_string(state);
-        int bw = MeasureText(msg, font_size + 4);
-        int bx = ((int)board_px - bw) / 2;
-        DrawRectangle(bx - 8, y - 4, bw + 16, font_size * 2 + 16,
-                      (Color){0, 0, 0, 180});
-        DrawText(msg, bx, y, font_size + 4, RED);
-        DrawText("R: new game   U: take back", bx, y + font_size + 8,
-                 font_size - 4, LIGHTGRAY);
+        DrawText(msg, (int)(card.x + (card.width - MeasureText(msg, font_size)) / 2),
+                 ty, font_size, (Color){0xf2, 0xc9, 0x6b, 0xff});
         return;
     }
 
+    // turn indicator: a disc in the colour to move
+    Color disc = state->turn ? (Color){0x1a, 0x16, 0x26, 0xff} : RAYWHITE;
+    DrawCircle((int)card.x + 18, y + h / 2, font_size * 0.4f, disc);
+    DrawCircleLines((int)card.x + 18, y + h / 2, font_size * 0.4f, UI_MUTED);
     const char *turn_msg = state->turn ? "Black to move" : "White to move";
-    DrawText(turn_msg, 8, y, font_size, WHITE);
-    DrawText("R: new game   U: take back", 8, y + font_size + 6, font_size - 6,
-             LIGHTGRAY);
+    DrawText(turn_msg, (int)card.x + 36, ty, font_size, UI_TEXT);
 
     color side = turn_to_color(state->turn);
     if (state->is_in_check[side]) {
         const char *chk = "CHECK";
-        int cx = (int)board_px - MeasureText(chk, font_size + 2) - 8;
-        DrawText(chk, cx, y, font_size + 2, ORANGE);
+        int cw = MeasureText(chk, small) + 16;
+        Rectangle badge = {card.x + card.width - cw - 10, (float)y + (h - small - 8) / 2,
+                           (float)cw, (float)small + 8};
+        DrawRectangleRounded(badge, 0.5f, 6, (Color){0xf0, 0x7a, 0x6e, 0xff});
+        DrawText(chk, (int)badge.x + 8, (int)badge.y + 4, small, (Color){0x1a, 0x10, 0x10, 0xff});
     }
 }
 
-// move list in the panel right of the board, one full move per row; when
-// there are more rows than fit, the oldest scroll off the top
-void draw_move_list(float tile_size, float scale, int screen_w, int screen_h,
-                    int y0, const game_state *state) {
-    float board_px = tile_size * scale * 8;
-    int font_size = ui_font(tile_size * scale * 0.3f);
+// move list card, one full move per row; the oldest rows scroll off the top
+int draw_move_list(int x0, int y0, int w, int max_y, const game_state *state) {
+    if (!ui_show_moves)
+        return y0;
+    int font_size = ui_font(max_y * 0.025f);
+    if (font_size < 12) font_size = 12;
     int row_h = font_size + 6;
-    int x0 = (int)board_px + 60;
-
-    DrawLine(x0 - 4, y0 - 6, screen_w - 28, y0 - 6, (Color){255, 255, 255, 40});
-    DrawText("Moves", x0, y0, font_size + 4, WHITE);
-    y0 += font_size + 16;
+    int pad = 10;
+    int h = max_y - y0 - 8;
+    if (h < row_h * 3)
+        return y0;
+    DrawRectangleRounded((Rectangle){(float)x0, (float)y0, (float)w, (float)h},
+                         0.12f, 6, UI_CARD);
+    int x = x0 + pad;
+    int y = y0 + pad;
+    DrawText("MOVES", x, y, font_size - 3, UI_MUTED);
+    y += font_size + 6;
 
     size_t full_moves = (state->history_count + 1) / 2;
-    int max_rows = (screen_h - y0 - 8) / row_h;
+    int max_rows = (y0 + h - pad - y) / row_h;
     if (max_rows < 1)
-        return;
+        return y0 + h + 10;
     size_t first = full_moves > (size_t)max_rows ? full_moves - max_rows : 0;
 
     int num_w = MeasureText("999.", font_size) + 6;
-    int col_w = MeasureText("exd8=Q#", font_size) + 16;
+    int col_w = MeasureText("exd8=Q#", font_size) + 20;
     for (size_t m = first; m < full_moves; m++) {
-        int y = y0 + (int)(m - first) * row_h;
-        DrawText(TextFormat("%zu.", m + 1), x0, y, font_size, LIGHTGRAY);
-        const ply_record *w = &state->history[m * 2];
-        DrawText(w->san, x0 + num_w, y, font_size, WHITE);
+        int ry = y + (int)(m - first) * row_h;
+        DrawText(TextFormat("%zu.", m + 1), x, ry, font_size, UI_MUTED);
+        const ply_record *wm = &state->history[m * 2];
+        DrawText(wm->san, x + num_w, ry, font_size, UI_TEXT);
         if (m * 2 + 1 < state->history_count) {
             const ply_record *b = &state->history[m * 2 + 1];
-            DrawText(b->san, x0 + num_w + col_w, y, font_size, WHITE);
+            DrawText(b->san, x + num_w + col_w, ry, font_size, UI_TEXT);
         }
     }
+    return y0 + h + 10;
 }
 
 // picker box geometry: a row of the four choices centered on the board
