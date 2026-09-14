@@ -39,7 +39,12 @@ The trick that makes it feel instant: **while you think, the engine is already a
 | C | Toggle the top three candidate lines (coach) |
 | T | Toggle threat display (coach) |
 | S | Switch sides with the engine (coach) |
+| + / - / 0 | Bigger / smaller / default text (the window itself is resizable; the board follows) |
 | Esc | Quit |
+
+## Portable executable
+
+`mischess.exe` (or `mischess` on Linux/macOS) is self-contained: the sprite atlas is compiled in and the C runtime is linked statically, so the single file can be copied anywhere and run with no `assets/` folder and no compiler DLLs beside it. The Stockfish engine is the one optional extra: put it in an `engines/` folder next to the executable (the release zips ship it that way) and coach mode switches on; without it you get the plain two-player game.
 
 ## Building
 

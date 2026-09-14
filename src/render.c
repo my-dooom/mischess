@@ -32,6 +32,8 @@ Rectangle selected_tile_rect = {48, 192, 16, 16};
 
 move_animation current_anim = {0};
 
+float ui_text_scale = 1.0f;
+
 const piece_type promotion_choices[PROMOTION_CHOICE_COUNT] = {QUEEN, ROOK,
                                                               BISHOP, KNIGHT};
 
@@ -111,13 +113,13 @@ void draw_possible_moves(possible_moves *moves, float scale) {
     }
 }
 
-void initialize_render(const char *texture_path, Texture *tex_pattern,
-                       tile *tiles) {
-    /// Initializes the rendering system, including loading textures and setting
-    /// up any necessary OpenGL state.
+void initialize_render(const unsigned char *png, int png_len,
+                       Texture *tex_pattern, tile *tiles) {
     // NOTE: Textures must be loaded after Window initialization (OpenGL context
     // is required)
-    *tex_pattern = LoadTexture(texture_path);
+    Image atlas = LoadImageFromMemory(".png", png, png_len);
+    *tex_pattern = LoadTextureFromImage(atlas);
+    UnloadImage(atlas);
     SetTextureFilter(*tex_pattern, TEXTURE_FILTER_POINT);
     tiles[0].rec_pos_from_texture = (Rectangle){32, 8, 16, 16};
     tiles[1].rec_pos_from_texture = (Rectangle){48, 8, 16, 16};
@@ -126,7 +128,7 @@ void initialize_render(const char *texture_path, Texture *tex_pattern,
 void draw_board_labels(float tile_size, float scale) {
     const char *col_names[] = {"A", "B", "C", "D", "E", "F", "G", "H"};
     float ts = tile_size * scale;
-    int font_size = (int)(ts * 0.35f);
+    int font_size = ui_font(ts * 0.35f);
     for (int c = 0; c < 8; c++) {
         int x =
             (int)(c * ts + ts / 2) - MeasureText(col_names[c], font_size) / 2;
@@ -179,7 +181,7 @@ void draw_check_highlight(float scale, const game_state *state) {
 
 void draw_ui(float tile_size, float scale, const game_state *state) {
     float board_px = tile_size * scale * 8;
-    int font_size = (int)(tile_size * scale * 0.35f);
+    int font_size = ui_font(tile_size * scale * 0.35f);
     // the column labels sit directly under the board, status goes below them
     int y = (int)board_px + font_size + 14;
 
@@ -213,7 +215,7 @@ void draw_ui(float tile_size, float scale, const game_state *state) {
 void draw_move_list(float tile_size, float scale, int screen_w, int screen_h,
                     int y0, const game_state *state) {
     float board_px = tile_size * scale * 8;
-    int font_size = (int)(tile_size * scale * 0.3f);
+    int font_size = ui_font(tile_size * scale * 0.3f);
     int row_h = font_size + 6;
     int x0 = (int)board_px + 60;
 
@@ -271,7 +273,7 @@ void draw_promotion_picker(Texture *tex_pattern, float scale,
     DrawRectangleRec(box, (Color){0x40, 0x33, 0x53, 0xFF});
     DrawRectangleLinesEx(box, 2.0f, GOLD);
 
-    int font_size = (int)(ts * 0.3f);
+    int font_size = ui_font(ts * 0.3f);
     const char *title = "Promote to  (Q / R / B / N)";
     DrawText(title, (int)(box.x + (box.width - MeasureText(title, font_size)) / 2),
              (int)(box.y + 6), font_size, WHITE);

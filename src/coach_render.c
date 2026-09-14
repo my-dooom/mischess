@@ -76,7 +76,7 @@ void draw_coach_overlay(float scale, const coach *c, const game_state *state) {
     if (!coach_active(c))
         return;
     float ts = 16.0f * scale;
-    int font = (int)(ts * 0.25f);
+    int font = ui_font(ts * 0.25f);
     board_pos src, dest;
 
     if (c->show_threat && c->threat.valid && coach_is_human_turn(c, state) &&
@@ -161,7 +161,7 @@ static int draw_wrapped(const char *text, int x, int y, int max_w, int font,
 
 int draw_coach_panel(int x0, int y0, int w, int h, const coach *c,
                      const game_state *state) {
-    int font = (int)(h * 0.028f);
+    int font = ui_font(h * 0.028f);
     if (font < 14) font = 14;
     int small = font - 3;
     int y = y0;

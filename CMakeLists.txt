@@ -8,33 +8,54 @@ if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 endif()
 
+# ------------------------------------------------------------
+# Portable executable: the C runtime is linked statically so the .exe has
+# no MinGW/MSVC DLL dependencies (must be set before any target is created)
+# ------------------------------------------------------------
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 # Build raylib from source (vendored); disable unused features for faster builds
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_GAMES    OFF CACHE BOOL "" FORCE)
 add_subdirectory(raylib EXCLUDE_FROM_ALL)
 
+# ------------------------------------------------------------
+# Assets are compiled into the executable, so nothing has to sit beside it
+# ------------------------------------------------------------
+include(cmake/EmbedFile.cmake)
+set(GENERATED_DIR ${CMAKE_BINARY_DIR}/generated)
+embed_file(${CMAKE_SOURCE_DIR}/assets/atlas.png atlas_png
+           ${GENERATED_DIR}/atlas_png.c ${GENERATED_DIR}/atlas_png.h)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             ${CMAKE_SOURCE_DIR}/assets/atlas.png)
+
 file(GLOB_RECURSE SOURCES src/*.c)
-add_executable(${PROJECT_NAME} ${SOURCES})
+add_executable(${PROJECT_NAME} ${SOURCES} ${GENERATED_DIR}/atlas_png.c)
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/raylib/src
     ${CMAKE_SOURCE_DIR}/src/include
+    ${GENERATED_DIR}
 )
 
 # raylib's own CMake target carries all platform-specific link dependencies
 target_link_libraries(${PROJECT_NAME} PRIVATE raylib)
 
-# Hide the console window in release builds
+if(MINGW)
+    target_link_options(${PROJECT_NAME} PRIVATE -static -static-libgcc)
+endif()
+
+# Hide the console window in release builds (MSVC then expects WinMain
+# unless told to keep the plain main entry point)
 set_target_properties(${PROJECT_NAME} PROPERTIES
     WIN32_EXECUTABLE $<CONFIG:Release>
 )
-
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/assets
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets
-    COMMENT "Copying assets to build directory"
-)
+if(MSVC)
+    target_link_options(${PROJECT_NAME} PRIVATE
+        $<$<CONFIG:Release>:/ENTRY:mainCRTStartup>)
+endif()
 
 # ------------------------------------------------------------
 # Stockfish (coach engine), built from the vendored submodule
@@ -46,9 +67,6 @@ include(cmake/Stockfish.cmake)
 # ------------------------------------------------------------
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
-)
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/assets/
-    DESTINATION bin/assets
 )
 
 # ------------------------------------------------------------

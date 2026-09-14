@@ -20,6 +20,15 @@ typedef struct {
 
 extern move_animation current_anim;
 
+// multiplier on every UI font size, changed with + / - at runtime
+extern float ui_text_scale;
+
+// font size for a nominal pixel height, never below the readable minimum
+static inline int ui_font(float px) {
+    int f = (int)(px * ui_text_scale);
+    return f < 10 ? 10 : f;
+}
+
 extern Rectangle selected_tile_rect;
 
 extern Rectangle piece_rects[2][7]; // [color][piece_type]
@@ -36,8 +45,9 @@ void draw_possible_moves(possible_moves *moves, float scale);
 
 void draw_pieces(Texture *tex_pattern, float scale);
 
-void initialize_render(const char *texture_path, Texture *tex_pattern,
-                       tile *tiles);
+// loads the sprite atlas from the PNG bytes compiled into the executable
+void initialize_render(const unsigned char *png, int png_len,
+                       Texture *tex_pattern, tile *tiles);
 void draw_chessboard(tile *tiles, Texture *tex_pattern, float scale);
 void draw_board_labels(float tile_size, float scale);
 void draw_ui(float tile_size, float scale, const game_state *state);

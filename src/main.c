@@ -6,13 +6,29 @@
 #include "logger.h"
 #include "raylib.h"
 #include "render.h"
+#include "atlas_png.h"
 
 //------------------------------------------------------------------------------------
 // Program main entry point
 //------------------------------------------------------------------------------------
 
 static const int tile_size = 16;
-static const float scale = 5.0f;
+// board scale, recomputed every frame from the window size
+static float scale = 5.0f;
+
+// the smallest side panel that still fits the coach text and move list
+#define PANEL_MIN_W 380
+#define PANEL_GAP 60
+
+// Picks the largest board that leaves room for the status lines below it
+// and the side panel next to it. Status block is ~3 font lines of
+// 0.35 * tile height, which is what the 16.8 accounts for.
+static float fit_scale(int w, int h) {
+    float by_h = (h - 14.0f) / (128.0f + 16.8f * ui_text_scale);
+    float by_w = (w - PANEL_MIN_W - PANEL_GAP - 16.0f) / 128.0f;
+    float s = by_h < by_w ? by_h : by_w;
+    return s < 1.5f ? 1.5f : s;
+}
 
 static bool is_move_in_list(int target_row, int target_col,
                             const possible_moves *moves) {
@@ -173,19 +189,18 @@ static void convert_mouse_position_to_board_coordinates(Vector2 mouse_position,
 }
 
 int main(int argc, char **argv) {
-    const int margins = 150;
-    const int screenWidth = 1280;
-    const int screenHeight = tile_size * 8 * scale + margins;
     Vector2 mouse_position = {0, 0};
     int target_row = -1, target_col = -1;
 
     SetTraceLogCallback(LogColored);
 
-    InitWindow(screenWidth, screenHeight, "mischess");
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+    InitWindow(1280, 790, "mischess");
+    SetWindowMinSize(760, 480);
 
     Texture tex_pattern;
     tile tiles[2];
-    initialize_render("assets/atlas.png", &tex_pattern, tiles);
+    initialize_render(atlas_png, (int)atlas_png_len, &tex_pattern, tiles);
 
     initialize_board(board);
     init_game_state(&game);
@@ -196,6 +211,17 @@ int main(int argc, char **argv) {
 
     SetTargetFPS(60);
     while (!WindowShouldClose()) {
+        // text size: + / - (also on the keypad), 0 resets
+        if (IsKeyPressed(KEY_EQUAL) || IsKeyPressed(KEY_KP_ADD))
+            ui_text_scale = ui_text_scale < 2.5f ? ui_text_scale + 0.1f : 2.5f;
+        if (IsKeyPressed(KEY_MINUS) || IsKeyPressed(KEY_KP_SUBTRACT))
+            ui_text_scale = ui_text_scale > 0.7f ? ui_text_scale - 0.1f : 0.7f;
+        if (IsKeyPressed(KEY_ZERO) || IsKeyPressed(KEY_KP_0))
+            ui_text_scale = 1.0f;
+
+        const int screenWidth = GetScreenWidth();
+        const int screenHeight = GetScreenHeight();
+        scale = fit_scale(screenWidth, screenHeight);
         mouse_position = GetMousePosition();
 
         // engine I/O first so its reply lands before input is read
@@ -260,7 +286,7 @@ int main(int argc, char **argv) {
         draw_coach_overlay(scale, &the_coach, &game);
         draw_ui(tile_size, scale, &game);
         {
-            int px = (int)(tile_size * scale * 8) + 60;
+            int px = (int)(tile_size * scale * 8) + PANEL_GAP;
             int pw = screenWidth - px - 16;
             DrawRectangle(px - 12, 8, pw, screenHeight - 16,
                           (Color){0, 0, 0, 90});
