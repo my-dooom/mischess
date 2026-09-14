@@ -144,8 +144,15 @@ static int wrap_text(const char *text, int x, int y, int max_w, int font,
     char line[256] = "";
     const char *p = text;
     while (*p) {
-        const char *end = strchr(p, ' ');
-        size_t wl = end ? (size_t)(end - p) : strlen(p);
+        // a newline in the text forces a break
+        if (*p == '\n') {
+            if (draw && line[0]) DrawText(line, x, y, font, col);
+            if (line[0] || (p > text && p[-1] == '\n')) y += font + 4;
+            line[0] = '\0';
+            p++;
+            continue;
+        }
+        size_t wl = strcspn(p, " \n");
         char word[64];
         snprintf(word, sizeof(word), "%.*s", (int)wl, p);
         char trial[256];
@@ -256,8 +263,19 @@ static int body_plan(panel_ctx *p, int y, const coach *c,
         return para(p, y, strategist_last_error(), 0, TEXT_MUTED);
     if (st == STRATEGIST_LOADING)
         return text(p, y, "loading model...", p->small, TEXT_MUTED);
-    if (strategist_answer(t, sizeof(t)))
+    if (strategist_answer(t, sizeof(t))) {
+        // "White: ... Black: ..." reads better as two paragraphs
+        char *black = strstr(t, "Black:");
+        if (black && black != t) {
+            char *cut = black;
+            while (cut > t && (cut[-1] == ' ' || cut[-1] == '\n')) cut--;
+            *cut = '\0';
+            y = para(p, y, t, 0, TEXT_MAIN);
+            y += 4;
+            return para(p, y, black, 0, TEXT_MAIN);
+        }
         return para(p, y, t, 0, TEXT_MAIN);
+    }
     if (st == STRATEGIST_WRITING)
         return text(p, y, "thinking...", p->small, TEXT_MUTED);
     return text(p, y, "waiting for the opponent's next move", p->small, TEXT_MUTED);
@@ -389,8 +407,8 @@ int draw_coach_panel(int x0, int y0, int w, int h, const coach *c,
 
     if (c->show_plan)
         y = card(&p, y, strategist_get_state() == STRATEGIST_WRITING
-                            ? "OPPONENT'S PLAN  (writing...)"
-                            : "OPPONENT'S PLAN",
+                            ? "PLANS  (writing...)"
+                            : "PLANS",
                  ACCENT_PLAN, body_plan, c, state);
 
     if (c->show_candidates && human_turn)

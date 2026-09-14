@@ -59,6 +59,7 @@ struct strategist {
     // written by the game thread, read by the worker
     char model_path[512];
     char prompt[STRATEGIST_PROMPT_MAX];
+    char prefix[64];       // start of the model's turn, echoed into the answer
     unsigned request_id;   // bumped on every ask; the worker abandons old ones
     bool quit;
 
@@ -93,10 +94,10 @@ static void llama_quiet_log(enum ggml_log_level level, const char *text,
 // system prompt is the same for every question
 static const char *SYSTEM_PROMPT =
     "You are a chess coach talking to a club player. Using the position and "
-    "the engine information given, explain in two or three short sentences "
-    "what the opponent is planning: which pieces or squares they aim at, and "
-    "what the player should watch out for. Be concrete, mention squares and "
-    "pieces, no move lists, no greetings.";
+    "the engine lines given, describe the strategic plan of each side: which "
+    "pieces and squares White aims at, which pieces and squares Black aims "
+    "at, and the main idea behind each. Be concrete, mention squares and "
+    "pieces, two sentences per side, no long move lists, no greetings.";
 
 // ChessGPT (Waterhorse/chessgpt-chat-v1, GPT-NeoX trained on games, FEN
 // and commentary) has no chat template in its GGUF and expects the
@@ -114,28 +115,34 @@ static bool is_chessgpt(const struct llama_model *model) {
 // formats system + user through the model's own chat template; ChessGPT
 // gets its dialogue layout, anything else without a template a plain one
 static int build_chat(const struct llama_model *model, const char *user,
-                      char *out, int cap) {
-    if (is_chessgpt(model))
-        return snprintf(out, (size_t)cap,
-                        "A friendly, helpful chat between some humans."
-                        "<|endoftext|>Human 0: %s\n\n%s<|endoftext|>Human 1:",
-                        SYSTEM_PROMPT, user);
-    struct llama_chat_message msgs[2] = {{"system", SYSTEM_PROMPT},
-                                         {"user", user}};
-    const char *tmpl = llama_model_chat_template(model, NULL);
-    int n = llama_chat_apply_template(tmpl, msgs, 2, true, out, cap);
-    if (n < 0 || n >= cap)
-        n = snprintf(out, (size_t)cap, "%s\n\n%s\n\nAnswer:", SYSTEM_PROMPT, user);
+                      const char *prefix, char *out, int cap) {
+    int n;
+    if (is_chessgpt(model)) {
+        n = snprintf(out, (size_t)cap,
+                     "A friendly, helpful chat between some humans."
+                     "<|endoftext|>Human 0: %s\n\n%s<|endoftext|>Human 1:",
+                     SYSTEM_PROMPT, user);
+    } else {
+        struct llama_chat_message msgs[2] = {{"system", SYSTEM_PROMPT},
+                                             {"user", user}};
+        const char *tmpl = llama_model_chat_template(model, NULL);
+        n = llama_chat_apply_template(tmpl, msgs, 2, true, out, cap);
+        if (n < 0 || n >= cap)
+            n = snprintf(out, (size_t)cap, "%s\n\n%s\n\nAnswer:", SYSTEM_PROMPT, user);
+    }
+    // the model continues from the prefix as if it had written it
+    if (prefix[0] && n < cap)
+        n += snprintf(out + n, (size_t)(cap - n), " %s", prefix);
     return n;
 }
 
 static void worker_generate(strategist *s, struct llama_model *model,
                             struct llama_context *ctx,
                             struct llama_sampler *smpl, const char *prompt,
-                            unsigned id) {
+                            const char *prefix, unsigned id) {
     const struct llama_vocab *vocab = llama_model_get_vocab(model);
     static char chat[STRATEGIST_PROMPT_MAX * 2];
-    int chat_len = build_chat(model, prompt, chat, sizeof(chat));
+    int chat_len = build_chat(model, prompt, prefix, chat, sizeof(chat));
 
     static llama_token tokens[N_CTX];
     int n_tokens = llama_tokenize(vocab, chat, chat_len, tokens, N_CTX, true, true);
@@ -156,7 +163,7 @@ static void worker_generate(strategist *s, struct llama_model *model,
         return;
     }
 
-    size_t len = 0;
+    size_t len = strlen(prefix);
     for (int i = 0; i < MAX_NEW_TOKENS; i++) {
         llama_token tok = llama_sampler_sample(smpl, ctx, -1);
         if (llama_vocab_is_eog(vocab, tok))
@@ -242,11 +249,13 @@ static void worker_main(strategist *s) {
         bool quit = s->quit;
         unsigned id = s->request_id;
         char prompt[STRATEGIST_PROMPT_MAX];
+        char prefix[64];
         bool work = !quit && id != done_id;
         if (work) {
             memcpy(prompt, s->prompt, sizeof(prompt));
-            s->answer[0] = '\0';
-            s->has_answer = false;
+            memcpy(prefix, s->prefix, sizeof(prefix));
+            snprintf(s->answer, sizeof(s->answer), "%s", prefix);
+            s->has_answer = prefix[0] != '\0';
             s->answer_id = id;
             s->state = STRATEGIST_WRITING;
         }
@@ -257,7 +266,7 @@ static void worker_main(strategist *s) {
             sleep_ms(30);
             continue;
         }
-        worker_generate(s, model, ctx, smpl, prompt, id);
+        worker_generate(s, model, ctx, smpl, prompt, prefix, id);
         done_id = id;
         mutex_lock(&s->lock);
         if (s->request_id == id)
@@ -341,11 +350,12 @@ strategist_state strategist_get_state(void) {
 const char *strategist_model_name(void) { return the_strategist->model_name; }
 const char *strategist_last_error(void) { return the_strategist->error; }
 
-void strategist_ask(const char *user_prompt) {
+void strategist_ask(const char *user_prompt, const char *answer_prefix) {
     strategist *s = the_strategist;
     mutex_lock(&s->lock);
     if (s->state != STRATEGIST_OFF) {
         snprintf(s->prompt, sizeof(s->prompt), "%s", user_prompt);
+        snprintf(s->prefix, sizeof(s->prefix), "%s", answer_prefix ? answer_prefix : "");
         s->request_id++;
         s->answer[0] = '\0';
         s->has_answer = false;

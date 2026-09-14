@@ -145,8 +145,6 @@ static void begin_turn(coach *c, piece board[8][8], game_state *state) {
         c->threat.valid = false;
         // a null-move search from an in-check position is illegal
         if (state->is_in_check[to_move]) {
-            if (c->plan_pending)
-                coach_ask_strategist(c, board, state);
             begin_analysis(c, board, state);
         } else {
             begin_threat(c, board, state);
@@ -282,8 +280,6 @@ static void handle_line(coach *c, const char *line, piece board[8][8],
                     c->threat.valid = true;
                 }
             }
-            if (c->plan_pending)
-                coach_ask_strategist(c, board, state);
             begin_analysis(c, board, state);
         }
         break;
@@ -302,6 +298,9 @@ static void handle_line(coach *c, const char *line, piece board[8][8],
             if (!c->hint_frozen && (c->show_hint || c->show_candidates) &&
                 analysis_deep_enough(c))
                 freeze_hints(c);
+            // the strategist gets both sides' best lines once they are solid
+            if (c->plan_pending && analysis_deep_enough(c))
+                coach_ask_strategist(c, board, state);
         }
         // a bestmove here only arrives after "stop", handled in STOPPING
         break;
@@ -552,33 +551,39 @@ void coach_ask_strategist(coach *c, piece board[8][8], const game_state *state) 
         n += (size_t)snprintf(recent + n, sizeof(recent) - n, "%s", r->san);
         if (!r->turn) n += (size_t)snprintf(recent + n, sizeof(recent) - n, " ");
     }
-    const char *last_san = state->history_count
-                               ? state->history[state->history_count - 1].san
-                               : "(none)";
+
+    // the player's best line from the live analysis (deep enough by now)
+    char my_line[COACH_LINE_MAX] = "";
+    if (c->candidates_valid[0] && c->candidates[0].pv[0])
+        uci_line_to_san(board, state, c->candidates[0].pv, 5, my_line,
+                        sizeof(my_line));
 
     char eval[16], threat_eval[16];
-    uci_format_score(cp_white_to_human(c, c->eval_cp_white), eval, sizeof(eval));
+    uci_format_score(c->eval_cp_white, eval, sizeof(eval));
     uci_format_score(c->threat.cp_for_human, threat_eval, sizeof(threat_eval));
 
     char prompt[STRATEGIST_PROMPT_MAX];
-    snprintf(prompt, sizeof(prompt),
-             "The player has the %s pieces and it is the player's move. The opponent has %s.\n"
+    int len = snprintf(prompt, sizeof(prompt),
              "Position (FEN): %s\n"
-             "Recent moves: %s\n"
-             "The opponent just played %s. Engine evaluation now: %s for the player.\n"
-             "%s%s%s"
-             "%s%s%s%s%s"
-             "Explain the opponent's plan (the %s moves in that line) and what the player must watch out for.",
-             me, them, fen, recent[0] ? recent : "(game start)", last_san, eval,
-             c->engine_plan_line[0] ? "Engine line the opponent was counting on (both sides' moves, standard numbering): " : "",
-             c->engine_plan_line[0] ? c->engine_plan_line : "",
-             c->engine_plan_line[0] ? "\n" : "",
-             c->threat.valid ? "If the player passed, the opponent would play " : "",
-             c->threat.valid ? c->threat.san : "",
-             c->threat.valid ? " (evaluation then " : "",
-             c->threat.valid ? threat_eval : "",
-             c->threat.valid ? " for the player).\n" : "", them);
-    strategist_ask(prompt);
+             "%s to move. Engine evaluation: %s for White.\n"
+             "Recent moves: %s\n",
+             fen, me, eval, recent[0] ? recent : "(game start)");
+    if (c->engine_plan_line[0])
+        len += snprintf(prompt + len, sizeof(prompt) - (size_t)len,
+             "Line %s was counting on when choosing the last move: %s\n",
+             them, c->engine_plan_line);
+    if (my_line[0])
+        len += snprintf(prompt + len, sizeof(prompt) - (size_t)len,
+             "Best line for %s now, according to the engine: %s\n", me, my_line);
+    if (c->threat.valid)
+        len += snprintf(prompt + len, sizeof(prompt) - (size_t)len,
+             "If %s passed, %s would play %s (evaluation then %s for %s).\n",
+             me, them, c->threat.san, threat_eval, me);
+    snprintf(prompt + len, sizeof(prompt) - (size_t)len,
+             "Describe the plan for each side. Answer in exactly this shape:\n"
+             "White: <two sentences on White's plan and key squares>\n"
+             "Black: <two sentences on Black's plan and key squares>");
+    strategist_ask(prompt, "White:");
 }
 
 void coach_switch_sides(coach *c, piece board[8][8], game_state *state) {

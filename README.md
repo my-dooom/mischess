@@ -29,7 +29,7 @@ The trick that makes it feel instant: **while you think, the engine is already a
 
 ## Strategist: the opponent's plan in words
 
-On top of the engine numbers, an optional local language model (any GGUF file run through [llama.cpp](https://github.com/ggml-org/llama.cpp), built from the `llama.cpp/` submodule) explains after each engine move what the opponent is planning. The prompt gives the model the FEN, the recent moves, the line the engine was counting on when it chose its move, and the threat search result, so even a small model has something concrete to talk about. Toggle the text with `P`; it streams into the panel as it is written.
+On top of the engine numbers, an optional local language model (any GGUF file run through [llama.cpp](https://github.com/ggml-org/llama.cpp), built from the `llama.cpp/` submodule) describes after each engine move the strategic plan of each side, White and Black. The prompt gives the model the FEN, the recent moves, the line the engine was counting on when it chose its move, and the threat search result, so even a small model has something concrete to talk about. Toggle the text with `P`; it streams into the panel as it is written.
 
 No model ships with the game. Put a `.gguf` file into a `models/` folder next to the executable (or set `MISCHESS_MODEL`, or pass the path as the second argument). Suggestions, all open weights:
 
@@ -59,7 +59,7 @@ Even a chess-trained model does not calculate; it narrates. The engine says what
 | C | Toggle the top three candidate lines (coach) |
 | T | Toggle threat display (coach) |
 | S | Switch sides with the engine (coach) |
-| P | Toggle the opponent's plan text (strategist) |
+| P | Toggle the plans text for both sides (strategist) |
 | M | Show / hide the move list (hidden by default) |
 | + / - / 0 | Bigger / smaller / default text (the window itself is resizable; the board follows) |
 | Esc | Quit |

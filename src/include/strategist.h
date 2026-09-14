@@ -34,8 +34,10 @@ strategist_state strategist_get_state(void);
 const char *strategist_model_name(void);
 const char *strategist_last_error(void);
 
-// Starts a new answer; any answer in progress is abandoned.
-void strategist_ask(const char *user_prompt);
+// Starts a new answer; any answer in progress is abandoned. `answer_prefix`
+// (may be "") is placed at the start of the model's turn so the answer
+// continues from it, which pins the shape of the reply.
+void strategist_ask(const char *user_prompt, const char *answer_prefix);
 
 // Copies the current (possibly partial) answer into `out`. Returns false
 // when there is no answer at all yet.
