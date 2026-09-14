@@ -188,9 +188,13 @@ static const char *find_model(const char *explicit_path) {
         return NULL;
     FilePathList files = LoadDirectoryFilesEx(path, ".gguf", false);
     const char *found = NULL;
-    if (files.count > 0) {
-        snprintf(path, sizeof(path), "%s", files.paths[0]);
-        found = path;
+    // a chess-trained model wins over a general one when both are present
+    for (unsigned i = 0; i < files.count; i++) {
+        if (!found || TextFindIndex(TextToLower(GetFileName(files.paths[i])),
+                                    "chessgpt") >= 0) {
+            snprintf(path, sizeof(path), "%s", files.paths[i]);
+            found = path;
+        }
     }
     UnloadDirectoryFiles(files);
     return found;

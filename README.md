@@ -37,9 +37,15 @@ No model ships with the game. Put a `.gguf` file into a `models/` folder next to
 |---|---|---|
 | [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF) `q4_k_m` | ~1 GB | Good default: fluent, fast on a CPU (Apache-2.0) |
 | [Qwen2.5-0.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF) `q4_k_m` | ~400 MB | Fastest, rougher prose |
-| [ChessGPT](https://huggingface.co/Waterhorse/chessgpt-chat-v1) | ~1.7 GB at Q4 | Trained on chess games, FEN and commentary; convert with llama.cpp's `convert_hf_to_gguf.py` |
+| [ChessGPT](https://huggingface.co/Waterhorse/chessgpt-chat-v1) ([GGUF](https://huggingface.co/msj121/chessgpt-chat-v1-Q4_K_M-GGUF)) | ~1.7 GB | Chess-trained (games, FEN, commentary), 2.8B, Apache-2.0. Preferred automatically when present |
 
-Small general models do not calculate chess; they narrate the engine's findings. That is the point: the engine says what, the model says why in plain language. Build without it with `-DMISCHESS_BUILD_LLM=OFF`; `-DMISCHESS_LLM_NATIVE=ON` tunes llama.cpp for your own CPU.
+ChessGPT is the chess-trained option: it was fine-tuned on chess games, FEN strings and human commentary, so it knows opening names and typical plans. The game recognises it by name, uses its own `Human 0 / Human 1` dialogue format, and picks it over any other model in `models/`. Direct download:
+
+```powershell
+curl -L -o build\Release\models\chessgpt-chat-v1-q4_k_m.gguf https://huggingface.co/msj121/chessgpt-chat-v1-Q4_K_M-GGUF/resolve/main/chessgpt-chat-v1-q4_k_m.gguf
+```
+
+Even a chess-trained model does not calculate; it narrates. The engine says what, the model says why in plain language. Build without it with `-DMISCHESS_BUILD_LLM=OFF`; `-DMISCHESS_LLM_NATIVE=ON` tunes llama.cpp for your own CPU.
 
 ## Controls
 

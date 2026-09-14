@@ -98,10 +98,28 @@ static const char *SYSTEM_PROMPT =
     "what the player should watch out for. Be concrete, mention squares and "
     "pieces, no move lists, no greetings.";
 
-// formats system + user through the model's own chat template; falls back
-// to a plain layout when the template is unknown to llama.cpp
+// ChessGPT (Waterhorse/chessgpt-chat-v1, GPT-NeoX trained on games, FEN
+// and commentary) has no chat template in its GGUF and expects the
+// "Human 0 / Human 1" dialogue layout from its model card, with the
+// <|endoftext|> token between turns.
+static bool is_chessgpt(const struct llama_model *model) {
+    char name[256] = "";
+    if (llama_model_meta_val_str(model, "general.name", name, sizeof(name)) < 0)
+        return false;
+    for (char *p = name; *p; p++)
+        if (*p >= 'A' && *p <= 'Z') *p = (char)(*p + 32);
+    return strstr(name, "chessgpt") != NULL;
+}
+
+// formats system + user through the model's own chat template; ChessGPT
+// gets its dialogue layout, anything else without a template a plain one
 static int build_chat(const struct llama_model *model, const char *user,
                       char *out, int cap) {
+    if (is_chessgpt(model))
+        return snprintf(out, (size_t)cap,
+                        "A friendly, helpful chat between some humans."
+                        "<|endoftext|>Human 0: %s\n\n%s<|endoftext|>Human 1:",
+                        SYSTEM_PROMPT, user);
     struct llama_chat_message msgs[2] = {{"system", SYSTEM_PROMPT},
                                          {"user", user}};
     const char *tmpl = llama_model_chat_template(model, NULL);
@@ -150,14 +168,24 @@ static void worker_generate(strategist *s, struct llama_model *model,
 
         mutex_lock(&s->lock);
         bool stale = s->request_id != id || s->quit;
+        bool finished = false;
         if (!stale && len + (size_t)pn < sizeof(s->answer) - 1) {
             memcpy(s->answer + len, piece, (size_t)pn);
             len += (size_t)pn;
             s->answer[len] = '\0';
             s->has_answer = true;
+            // a dialogue-style model may start the next speaker's turn
+            // instead of emitting end-of-text; cut it there
+            char *next_turn = strstr(s->answer, "\nHuman ");
+            if (!next_turn)
+                next_turn = strstr(s->answer, "Human 2:");
+            if (next_turn) {
+                *next_turn = '\0';
+                finished = true;
+            }
         }
         mutex_unlock(&s->lock);
-        if (stale)
+        if (stale || finished)
             return;
 
         batch = llama_batch_get_one(&tok, 1);
