@@ -211,15 +211,13 @@ void draw_ui(float tile_size, float scale, const game_state *state) {
 // move list in the panel right of the board, one full move per row; when
 // there are more rows than fit, the oldest scroll off the top
 void draw_move_list(float tile_size, float scale, int screen_w, int screen_h,
-                    const game_state *state) {
+                    int y0, const game_state *state) {
     float board_px = tile_size * scale * 8;
     int font_size = (int)(tile_size * scale * 0.3f);
     int row_h = font_size + 6;
     int x0 = (int)board_px + 60;
-    int y0 = 16;
-    int panel_w = screen_w - x0 - 16;
 
-    DrawRectangle(x0 - 12, y0 - 8, panel_w, screen_h - y0, (Color){0, 0, 0, 90});
+    DrawLine(x0 - 4, y0 - 6, screen_w - 28, y0 - 6, (Color){255, 255, 255, 40});
     DrawText("Moves", x0, y0, font_size + 4, WHITE);
     y0 += font_size + 16;
 

@@ -65,6 +65,7 @@ set(TEST_SOURCES
     src/game.c
     src/fen.c
     src/notation.c
+    src/uci.c
 )
 
 add_executable(chess_tests ${TEST_SOURCES})

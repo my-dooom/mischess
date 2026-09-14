@@ -1,0 +1,537 @@
+#include "coach.h"
+#include "fen.h"
+#include "notation.h"
+#include "raylib.h"
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+coach the_coach = {0};
+
+// search budgets in milliseconds
+#define THREAT_MS 300
+#define EVAL_MS 400
+#define PLAY_MS 700
+
+#define ELO_MIN 1320
+#define ELO_MAX 2800
+#define ELO_START 1400
+
+//------------------------------------------------------------------------------
+// engine plumbing
+//------------------------------------------------------------------------------
+
+static void send(coach *c, const char *line) {
+    if (!engine_send(&c->proc, line)) {
+        snprintf(c->last_error, sizeof(c->last_error), "engine stopped responding");
+        c->phase = COACH_OFF;
+    }
+}
+
+static void sendf(coach *c, const char *fmt, ...) {
+    char buf[512];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    send(c, buf);
+}
+
+static bool is_searching(const coach *c) {
+    switch (c->phase) {
+    case COACH_THREAT:
+    case COACH_ANALYZE:
+    case COACH_EVAL_BEFORE:
+    case COACH_EVAL_AFTER:
+    case COACH_PLAY:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static void current_fen(piece board[8][8], const game_state *state, char *out,
+                        size_t cap) {
+    update_full_fen(board, state);
+    snprintf(out, cap, "%s", fen_table);
+}
+
+static int cp_white_to_human(const coach *c, int cp_white) {
+    return c->human_color == White ? cp_white : -cp_white;
+}
+
+//------------------------------------------------------------------------------
+// starting searches
+//------------------------------------------------------------------------------
+
+static void begin_analysis(coach *c, piece board[8][8], const game_state *state) {
+    char fen[LONGEST_FEN];
+    current_fen(board, state, fen, sizeof(fen));
+    memset(c->candidates_valid, 0, sizeof(c->candidates_valid));
+    c->analysis_black_to_move = state->turn;
+    send(c, "setoption name UCI_LimitStrength value false");
+    sendf(c, "setoption name MultiPV value %d", COACH_CANDIDATES);
+    sendf(c, "position fen %s", fen);
+    send(c, "go infinite");
+    c->phase = COACH_ANALYZE;
+}
+
+static void begin_threat(coach *c, piece board[8][8], const game_state *state) {
+    char fen[LONGEST_FEN], flipped[LONGEST_FEN];
+    current_fen(board, state, fen, sizeof(fen));
+    if (!uci_fen_flip_side(fen, flipped, sizeof(flipped))) {
+        begin_analysis(c, board, state);
+        return;
+    }
+    c->search_last_valid = false;
+    send(c, "setoption name UCI_LimitStrength value false");
+    send(c, "setoption name MultiPV value 1");
+    sendf(c, "position fen %s", flipped);
+    sendf(c, "go movetime %d", THREAT_MS);
+    c->phase = COACH_THREAT;
+}
+
+static void begin_eval(coach *c, const char *fen, coach_phase phase) {
+    c->search_last_valid = false;
+    send(c, "setoption name UCI_LimitStrength value false");
+    send(c, "setoption name MultiPV value 1");
+    sendf(c, "position fen %s", fen);
+    sendf(c, "go movetime %d", EVAL_MS);
+    c->phase = phase;
+}
+
+static void begin_play(coach *c, piece board[8][8], const game_state *state) {
+    char fen[LONGEST_FEN];
+    current_fen(board, state, fen, sizeof(fen));
+    c->search_last_valid = false;
+    send(c, "setoption name MultiPV value 1");
+    send(c, "setoption name UCI_LimitStrength value true");
+    sendf(c, "setoption name UCI_Elo value %d", c->engine_elo);
+    sendf(c, "position fen %s", fen);
+    sendf(c, "go movetime %d", PLAY_MS);
+    c->phase = COACH_PLAY;
+}
+
+// decides what to do next from the current game state
+static void begin_turn(coach *c, piece board[8][8], game_state *state) {
+    c->needs_restart = false;
+    if (state->game_over) {
+        c->phase = COACH_IDLE;
+        return;
+    }
+    color to_move = turn_to_color(state->turn);
+    if (to_move == c->human_color) {
+        c->show_hint = false;
+        c->threat.valid = false;
+        // a null-move search from an in-check position is illegal
+        if (state->is_in_check[to_move])
+            begin_analysis(c, board, state);
+        else
+            begin_threat(c, board, state);
+        return;
+    }
+    // engine to move: grade the human's move first if there is one to grade
+    if (c->played_move[0]) {
+        if (c->before_valid) {
+            char fen[LONGEST_FEN];
+            current_fen(board, state, fen, sizeof(fen));
+            begin_eval(c, fen, COACH_EVAL_AFTER);
+        } else {
+            begin_eval(c, c->before_fen, COACH_EVAL_BEFORE);
+        }
+        return;
+    }
+    begin_play(c, board, state);
+}
+
+//------------------------------------------------------------------------------
+// grading
+//------------------------------------------------------------------------------
+
+static void adapt_elo(coach *c, int cp_loss) {
+    c->recent_cp_loss[c->recent_count % 6] = cp_loss;
+    c->recent_count++;
+    if (c->recent_count % 3 != 0)
+        return;
+    int n = c->recent_count < 6 ? c->recent_count : 6;
+    int sum = 0;
+    for (int i = 0; i < n; i++)
+        sum += c->recent_cp_loss[i];
+    int avg = sum / n;
+    if (avg < 30)
+        c->engine_elo += 100;
+    else if (avg > 120)
+        c->engine_elo -= 100;
+    if (c->engine_elo < ELO_MIN) c->engine_elo = ELO_MIN;
+    if (c->engine_elo > ELO_MAX) c->engine_elo = ELO_MAX;
+}
+
+// called with the evaluation of the position after the human's move
+static void grade_human_move(coach *c, const game_state *state) {
+    coach_feedback *f = &c->feedback;
+    memset(f, 0, sizeof(*f));
+
+    int after_white = uci_score_cp_for_white(&c->search_last, state->turn);
+    f->eval_after_cp = cp_white_to_human(c, after_white);
+    f->eval_before_cp = c->before_best_cp_human;
+    f->cp_loss = f->eval_before_cp - f->eval_after_cp;
+    if (f->cp_loss < 0)
+        f->cp_loss = 0;
+    bool played_best = strcmp(c->played_move, c->before_best_move) == 0;
+    if (played_best)
+        f->cp_loss = 0;
+    f->grade = uci_grade_move(f->cp_loss);
+
+    // what was played, from the history
+    if (state->history_count > 0)
+        snprintf(f->played_san, SAN_MAX, "%s",
+                 state->history[state->history_count - 1].san);
+
+    // what the engine preferred, and where it leads (a move graded Best
+    // needs no correction even when it differs from the top choice)
+    if (f->grade != GRADE_BEST && c->before_best_move[0]) {
+        board_pos src, dest;
+        piece_type promo;
+        if (uci_move_to_squares(c->before_best_move, &src, &dest, &promo))
+            move_to_san(c->before_board, src, dest, promo, f->best_san);
+        uci_line_to_san(c->before_board, &c->before_state, c->before_best_pv, 5,
+                        f->best_line, sizeof(f->best_line));
+    }
+    f->valid = true;
+
+    c->grade_counts[f->grade]++;
+    c->moves_graded++;
+    c->total_cp_loss += f->cp_loss;
+    adapt_elo(c, f->cp_loss);
+
+    TraceLog(LOG_INFO, "Coach: %s (%s, -%d cp)%s%s", f->played_san,
+             uci_grade_name(f->grade), f->cp_loss,
+             f->best_san[0] ? ", better was " : "", f->best_san);
+    c->played_move[0] = '\0';
+    c->before_valid = false;
+}
+
+//------------------------------------------------------------------------------
+// engine output
+//------------------------------------------------------------------------------
+
+static void handle_line(coach *c, const char *line, piece board[8][8],
+                        game_state *state) {
+    uci_info info;
+    char move[UCI_MOVE_MAX];
+
+    switch (c->phase) {
+    case COACH_BOOT:
+        if (strncmp(line, "id name ", 8) == 0) {
+            snprintf(c->engine_name, sizeof(c->engine_name), "%s", line + 8);
+        } else if (strcmp(line, "uciok") == 0) {
+            send(c, "setoption name Threads value 1");
+            send(c, "ucinewgame");
+            send(c, "isready");
+        } else if (strcmp(line, "readyok") == 0) {
+            TraceLog(LOG_INFO, "Coach: %s ready", c->engine_name);
+            begin_turn(c, board, state);
+        }
+        break;
+
+    case COACH_THREAT:
+        if (uci_parse_info(line, &info)) {
+            if (info.multipv == 1) {
+                c->search_last = info;
+                c->search_last_valid = true;
+            }
+        } else if (uci_parse_bestmove(line, move, sizeof(move))) {
+            c->threat.valid = false;
+            if (c->needs_restart) {
+                begin_turn(c, board, state);
+                break;
+            }
+            if (move[0] && c->search_last_valid) {
+                board_pos src, dest;
+                piece_type promo;
+                if (uci_move_to_squares(move, &src, &dest, &promo) &&
+                    board[src.row][src.col].type != EMPTY) {
+                    snprintf(c->threat.move_uci, sizeof(c->threat.move_uci), "%s", move);
+                    move_to_san(board, src, dest, promo, c->threat.san);
+                    // score is from the opponent's view (they were to move)
+                    int white = uci_score_cp_for_white(&c->search_last, !state->turn);
+                    c->threat.cp_for_human = cp_white_to_human(c, white);
+                    c->threat.valid = true;
+                }
+            }
+            begin_analysis(c, board, state);
+        }
+        break;
+
+    case COACH_ANALYZE:
+        if (uci_parse_info(line, &info)) {
+            int i = info.multipv - 1;
+            if (i >= 0 && i < COACH_CANDIDATES) {
+                c->candidates[i] = info;
+                c->candidates_valid[i] = true;
+                if (i == 0)
+                    c->eval_cp_white =
+                        uci_score_cp_for_white(&info, c->analysis_black_to_move);
+            }
+        }
+        // a bestmove here only arrives after "stop", handled in STOPPING
+        break;
+
+    case COACH_STOPPING:
+        if (uci_parse_bestmove(line, move, sizeof(move)))
+            begin_turn(c, board, state);
+        break;
+
+    case COACH_EVAL_BEFORE:
+        if (uci_parse_info(line, &info)) {
+            if (info.multipv == 1) {
+                c->search_last = info;
+                c->search_last_valid = true;
+            }
+        } else if (uci_parse_bestmove(line, move, sizeof(move))) {
+            if (c->needs_restart) {
+                begin_turn(c, board, state);
+                break;
+            }
+            if (c->search_last_valid) {
+                int white = uci_score_cp_for_white(&c->search_last,
+                                                   c->before_state.turn);
+                c->before_best_cp_human = cp_white_to_human(c, white);
+                snprintf(c->before_best_move, sizeof(c->before_best_move), "%s",
+                         c->search_last.first_move);
+                snprintf(c->before_best_pv, sizeof(c->before_best_pv), "%s",
+                         c->search_last.pv);
+                c->before_valid = true;
+                begin_turn(c, board, state); // -> EVAL_AFTER
+            } else {
+                c->played_move[0] = '\0';
+                begin_play(c, board, state);
+            }
+        }
+        break;
+
+    case COACH_EVAL_AFTER:
+        if (uci_parse_info(line, &info)) {
+            if (info.multipv == 1) {
+                c->search_last = info;
+                c->search_last_valid = true;
+            }
+        } else if (uci_parse_bestmove(line, move, sizeof(move))) {
+            if (c->needs_restart) {
+                begin_turn(c, board, state);
+                break;
+            }
+            if (c->search_last_valid)
+                grade_human_move(c, state);
+            else
+                c->played_move[0] = '\0';
+            begin_play(c, board, state);
+        }
+        break;
+
+    case COACH_PLAY:
+        if (uci_parse_info(line, &info)) {
+            if (info.multipv == 1)
+                c->eval_cp_white = uci_score_cp_for_white(&info, state->turn);
+        } else if (uci_parse_bestmove(line, move, sizeof(move))) {
+            if (c->needs_restart) {
+                begin_turn(c, board, state);
+                break;
+            }
+            board_pos src, dest;
+            piece_type promo;
+            if (move[0] && uci_move_to_squares(move, &src, &dest, &promo) &&
+                make_move(board, state, src, dest, promo)) {
+                c->engine_moved = true;
+                c->engine_move_src = src;
+                c->engine_move_dest = dest;
+                TraceLog(LOG_INFO, "Coach: engine plays %s",
+                         state->history[state->history_count - 1].san);
+            } else {
+                TraceLog(LOG_WARNING, "Coach: engine move '%s' rejected", move);
+            }
+            begin_turn(c, board, state);
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+//------------------------------------------------------------------------------
+// public API
+//------------------------------------------------------------------------------
+
+static bool try_spawn(coach *c, const char *path) {
+    if (!path || !path[0])
+        return false;
+    if (engine_spawn(&c->proc, path)) {
+        TraceLog(LOG_INFO, "Coach: started engine '%s'", path);
+        return true;
+    }
+    return false;
+}
+
+void coach_init(coach *c, const char *explicit_path) {
+    memset(c, 0, sizeof(*c));
+    c->phase = COACH_OFF;
+    c->human_color = White;
+    c->engine_elo = ELO_START;
+    c->show_threat = true;
+
+    char exe_dir[512];
+    snprintf(exe_dir, sizeof(exe_dir), "%s", GetApplicationDirectory());
+    char bundled[600];
+#ifdef _WIN32
+    snprintf(bundled, sizeof(bundled), "%sengines\\stockfish.exe", exe_dir);
+#else
+    snprintf(bundled, sizeof(bundled), "%sengines/stockfish", exe_dir);
+#endif
+
+    if (!try_spawn(c, explicit_path) && !try_spawn(c, getenv("MISCHESS_ENGINE")) &&
+        !try_spawn(c, bundled) && !try_spawn(c, "stockfish")) {
+        snprintf(c->last_error, sizeof(c->last_error),
+                 "No UCI engine found. Set MISCHESS_ENGINE or drop "
+                 "stockfish into engines/");
+        TraceLog(LOG_WARNING, "Coach: %s", c->last_error);
+        return;
+    }
+    c->phase = COACH_BOOT;
+    send(c, "uci");
+}
+
+void coach_shutdown(coach *c) {
+    if (c->proc.running)
+        engine_close(&c->proc);
+    c->phase = COACH_OFF;
+}
+
+void coach_update(coach *c, piece board[8][8], game_state *state) {
+    if (c->phase == COACH_OFF)
+        return;
+    if (!c->proc.running) {
+        snprintf(c->last_error, sizeof(c->last_error), "engine process exited");
+        TraceLog(LOG_ERROR, "Coach: %s", c->last_error);
+        c->phase = COACH_OFF;
+        return;
+    }
+    char line[1024];
+    // cap the work per frame so a chatty engine cannot stall rendering
+    for (int i = 0; i < 64 && engine_poll_line(&c->proc, line, sizeof(line)); i++)
+        handle_line(c, line, board, state);
+}
+
+void coach_on_human_move(coach *c, piece board[8][8], game_state *state,
+                         board_pos src, board_pos dest, piece_type promo) {
+    if (c->phase == COACH_OFF)
+        return;
+    (void)board;
+    uci_squares_to_move(src, dest, promo, c->played_move, sizeof(c->played_move));
+
+    // snapshot the position the move was played from
+    const ply_record *rec = &state->history[state->history_count - 1];
+    memcpy(c->before_board, rec->board, sizeof(c->before_board));
+    c->before_state = *state;
+    c->before_state.turn = rec->turn;
+    c->before_state.en_passant_square = rec->en_passant_square;
+    memcpy(c->before_state.can_castle_short, rec->can_castle_short,
+           sizeof(rec->can_castle_short));
+    memcpy(c->before_state.can_castle_long, rec->can_castle_long,
+           sizeof(rec->can_castle_long));
+    c->before_state.move_count = rec->move_count;
+    c->before_state.halfmove_clock = rec->halfmove_clock;
+    c->before_state.history = NULL;
+    c->before_state.history_count = 0;
+    c->before_state.history_capacity = 0;
+    c->before_state.possible_moves.pos = NULL;
+    c->before_state.possible_moves.count = 0;
+    c->before_state.possible_moves.capacity = 0;
+    c->before_state.game_over = false;
+    update_full_fen(c->before_board, &c->before_state);
+    snprintf(c->before_fen, sizeof(c->before_fen), "%s", fen_table);
+    update_full_fen(board, state); // leave the global FEN on the live position
+
+    // if the analysis was running we already know the best move
+    c->before_valid = false;
+    if (c->phase == COACH_ANALYZE && c->candidates_valid[0]) {
+        int white = uci_score_cp_for_white(&c->candidates[0],
+                                           c->analysis_black_to_move);
+        c->before_best_cp_human = cp_white_to_human(c, white);
+        snprintf(c->before_best_move, sizeof(c->before_best_move), "%s",
+                 c->candidates[0].first_move);
+        snprintf(c->before_best_pv, sizeof(c->before_best_pv), "%s",
+                 c->candidates[0].pv);
+        c->before_valid = true;
+    }
+    coach_on_position_changed(c, board, state);
+}
+
+void coach_on_position_changed(coach *c, piece board[8][8],
+                               game_state *state) {
+    if (c->phase == COACH_OFF || c->phase == COACH_BOOT)
+        return;
+    c->show_hint = false;
+    if (is_searching(c)) {
+        // the running search is stale; its bestmove is discarded
+        c->needs_restart = true;
+        send(c, "stop");
+        c->phase = COACH_STOPPING;
+        return;
+    }
+    // a bestmove is still pending; it will re-plan when it arrives
+    if (c->phase == COACH_STOPPING)
+        return;
+    begin_turn(c, board, state);
+}
+
+void coach_switch_sides(coach *c, piece board[8][8], game_state *state) {
+    c->human_color = opposite(c->human_color);
+    c->played_move[0] = '\0';
+    c->before_valid = false;
+    c->feedback.valid = false;
+    coach_on_position_changed(c, board, state);
+}
+
+void coach_new_game(coach *c, piece board[8][8], game_state *state) {
+    c->played_move[0] = '\0';
+    c->before_valid = false;
+    c->feedback.valid = false;
+    c->threat.valid = false;
+    memset(c->grade_counts, 0, sizeof(c->grade_counts));
+    c->moves_graded = 0;
+    c->total_cp_loss = 0;
+    c->recent_count = 0;
+    c->hints_used = 0;
+    c->eval_cp_white = 0;
+    coach_on_position_changed(c, board, state);
+}
+
+bool coach_active(const coach *c) {
+    return c->phase != COACH_OFF;
+}
+
+bool coach_engine_thinking(const coach *c) {
+    return c->phase == COACH_PLAY || c->phase == COACH_EVAL_AFTER ||
+           c->phase == COACH_EVAL_BEFORE;
+}
+
+bool coach_is_human_turn(const coach *c, const game_state *state) {
+    return turn_to_color(state->turn) == c->human_color;
+}
+
+bool coach_take_engine_move(coach *c, board_pos *src, board_pos *dest) {
+    if (!c->engine_moved)
+        return false;
+    c->engine_moved = false;
+    *src = c->engine_move_src;
+    *dest = c->engine_move_dest;
+    return true;
+}
+
+const char *coach_hint_move(const coach *c) {
+    if (c->phase == COACH_ANALYZE && c->candidates_valid[0])
+        return c->candidates[0].first_move;
+    return NULL;
+}

@@ -1,4 +1,6 @@
 #include "board.h"
+#include "coach.h"
+#include "coach_render.h"
 #include "fen.h"
 #include "game.h"
 #include "logger.h"
@@ -51,6 +53,7 @@ static void commit_move(game_state *state, board_pos src, board_pos dest,
     }
     start_move_animation(&current_anim, moving_piece, src, dest);
     update_full_fen(board, state);
+    coach_on_human_move(&the_coach, board, state, src, dest, promotion);
     const ply_record *last = &state->history[state->history_count - 1];
     TraceLog(LOG_INFO, "%zu%s %s", last->move_count / 2 + 1,
              last->turn ? "..." : ".", last->san);
@@ -140,6 +143,18 @@ static void reset_game(game_state *state) {
     update_capture_matrices(board);
     current_anim.active = false;
     TraceLog(LOG_INFO, "Game reset");
+    coach_new_game(&the_coach, board, state);
+}
+
+// in coach mode a take-back rewinds to the previous human turn
+static void take_back(game_state *state) {
+    if (!undo_move(board, state))
+        return;
+    if (coach_active(&the_coach) && !coach_is_human_turn(&the_coach, state))
+        undo_move(board, state);
+    update_full_fen(board, state);
+    TraceLog(LOG_INFO, "Move undone");
+    coach_on_position_changed(&the_coach, board, state);
 }
 
 static void convert_mouse_position_to_board_coordinates(Vector2 mouse_position,
@@ -157,9 +172,9 @@ static void convert_mouse_position_to_board_coordinates(Vector2 mouse_position,
     }
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     const int margins = 150;
-    const int screenWidth = 1100;
+    const int screenWidth = 1280;
     const int screenHeight = tile_size * 8 * scale + margins;
     Vector2 mouse_position = {0, 0};
     int target_row = -1, target_col = -1;
@@ -177,27 +192,53 @@ int main(void) {
     update_full_fen(board, &game);
     update_capture_matrices(board); // seed attacked_by cache before first move
 
+    coach_init(&the_coach, argc > 1 ? argv[1] : NULL);
+
     SetTargetFPS(60);
     while (!WindowShouldClose()) {
         mouse_position = GetMousePosition();
+
+        // engine I/O first so its reply lands before input is read
+        coach_update(&the_coach, board, &game);
+        board_pos eng_src, eng_dest;
+        if (coach_take_engine_move(&the_coach, &eng_src, &eng_dest)) {
+            start_move_animation(&current_anim,
+                                 board[eng_dest.row][eng_dest.col], eng_src,
+                                 eng_dest);
+            update_full_fen(board, &game);
+            print_fen();
+            if (game.game_over)
+                TraceLog(LOG_WARNING, "%s", result_to_string(&game));
+        }
+        bool human_may_move = !coach_active(&the_coach) ||
+                              coach_is_human_turn(&the_coach, &game);
 
         if (game.promotion_pending) {
             handle_promotion_input(&game, mouse_position);
         } else {
             convert_mouse_position_to_board_coordinates(
                 mouse_position, tile_size * scale, &target_row, &target_col);
-            if (!game.game_over)
+            if (!game.game_over && human_may_move)
                 handle_input(target_row, target_col, &game);
 
             // R resets, U takes back the last move (also after game over)
             if (IsKeyPressed(KEY_R))
                 reset_game(&game);
-            if (IsKeyPressed(KEY_U) && !current_anim.active) {
-                if (undo_move(board, &game)) {
-                    update_full_fen(board, &game);
-                    TraceLog(LOG_INFO, "Move undone");
-                }
+            if (IsKeyPressed(KEY_U) && !current_anim.active)
+                take_back(&game);
+
+            // coach toggles
+            if (IsKeyPressed(KEY_H)) {
+                the_coach.show_hint = !the_coach.show_hint;
+                if (the_coach.show_hint)
+                    the_coach.hints_used++;
             }
+            if (IsKeyPressed(KEY_C))
+                the_coach.show_candidates = !the_coach.show_candidates;
+            if (IsKeyPressed(KEY_T))
+                the_coach.show_threat = !the_coach.show_threat;
+            if (IsKeyPressed(KEY_S) && !current_anim.active)
+                coach_switch_sides(&the_coach, board, &game);
         }
 
         BeginDrawing();
@@ -211,12 +252,23 @@ int main(void) {
         draw_board_labels(tile_size, scale);
         draw_selection_highlight(scale, &game.current_selection);
         draw_possible_moves(&game.possible_moves, scale);
+        draw_coach_overlay(scale, &the_coach, &game);
         draw_ui(tile_size, scale, &game);
-        draw_move_list(tile_size, scale, screenWidth, screenHeight, &game);
+        {
+            int px = (int)(tile_size * scale * 8) + 60;
+            int pw = screenWidth - px - 16;
+            DrawRectangle(px - 12, 8, pw, screenHeight - 16,
+                          (Color){0, 0, 0, 90});
+            int y = draw_coach_panel(px, 16, pw - 12, screenHeight,
+                                     &the_coach, &game);
+            draw_move_list(tile_size, scale, screenWidth, screenHeight, y + 8,
+                           &game);
+        }
         draw_promotion_picker(&tex_pattern, scale, &game);
         EndDrawing();
     }
 
+    coach_shutdown(&the_coach);
     free_game_state(&game);
     UnloadTexture(tex_pattern);
     CloseWindow();

@@ -3,6 +3,8 @@
 #include "board.h"
 #include "fen.h"
 #include "game.h"
+#include "notation.h"
+#include "uci.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -419,6 +421,133 @@ static void test_undo(void) {
     ASSERT(game.can_castle_short[Black], "castling rights survive undo");
 }
 
+
+// ---------------------------------------------------------------------------
+// UCI text layer (used by the coach)
+// ---------------------------------------------------------------------------
+
+static void test_uci_parse_info(void) {
+    uci_info info;
+    bool ok = uci_parse_info(
+        "info depth 18 seldepth 25 multipv 2 score cp -35 nodes 123 nps 1 "
+        "time 5 pv e7e5 g1f3 b8c6",
+        &info);
+    ASSERT(ok, "info line with score and pv parses");
+    ASSERT(info.depth == 18 && info.multipv == 2, "depth and multipv parsed");
+    ASSERT(!info.is_mate && info.score_cp == -35, "cp score parsed");
+    ASSERT(strcmp(info.first_move, "e7e5") == 0, "first pv move parsed");
+    ASSERT(strcmp(info.pv, "e7e5 g1f3 b8c6") == 0, "whole pv parsed");
+
+    ok = uci_parse_info("info depth 5 score mate -3 pv h7h6", &info);
+    ASSERT(ok && info.is_mate && info.mate_in == -3, "mate score parsed");
+    ASSERT(info.multipv == 1, "multipv defaults to 1");
+
+    ASSERT(!uci_parse_info("info string NNUE evaluation using nn.nnue", &info),
+           "info string lines are ignored");
+    ASSERT(!uci_parse_info("info depth 3 currmove e2e4 currmovenumber 1", &info),
+           "currmove lines without a score are ignored");
+    ASSERT(!uci_parse_info("bestmove e2e4", &info), "bestmove is not info");
+}
+
+static void test_uci_parse_bestmove(void) {
+    char mv[UCI_MOVE_MAX];
+    ASSERT(uci_parse_bestmove("bestmove e2e4 ponder e7e5", mv, sizeof(mv)) &&
+               strcmp(mv, "e2e4") == 0,
+           "bestmove with ponder");
+    ASSERT(uci_parse_bestmove("bestmove e7e8q", mv, sizeof(mv)) &&
+               strcmp(mv, "e7e8q") == 0,
+           "promotion bestmove");
+    ASSERT(uci_parse_bestmove("bestmove (none)", mv, sizeof(mv)) && mv[0] == 0,
+           "(none) yields an empty move");
+    ASSERT(!uci_parse_bestmove("info depth 1", mv, sizeof(mv)),
+           "non-bestmove line rejected");
+}
+
+static void test_uci_moves(void) {
+    board_pos src, dest;
+    piece_type promo;
+    ASSERT(uci_move_to_squares("e2e4", &src, &dest, &promo), "e2e4 parses");
+    ASSERT(src.row == 6 && src.col == 4 && dest.row == 4 && dest.col == 4,
+           "e2e4 maps to rows 6->4, col 4");
+    ASSERT(promo == EMPTY, "no promotion");
+    ASSERT(uci_move_to_squares("b7a8n", &src, &dest, &promo) && promo == KNIGHT,
+           "promotion suffix parsed");
+    ASSERT(!uci_move_to_squares("e2", &src, &dest, &promo), "too short");
+    ASSERT(!uci_move_to_squares("z9e4", &src, &dest, &promo), "bad file");
+
+    char out[UCI_MOVE_MAX];
+    uci_squares_to_move((board_pos){6, 4}, (board_pos){4, 4}, EMPTY, out,
+                        sizeof(out));
+    ASSERT(strcmp(out, "e2e4") == 0, "squares back to e2e4");
+    uci_squares_to_move((board_pos){1, 1}, (board_pos){0, 0}, QUEEN, out,
+                        sizeof(out));
+    ASSERT(strcmp(out, "b7a8q") == 0, "promotion suffix written");
+}
+
+static void test_uci_scores(void) {
+    uci_info info = {0};
+    info.score_cp = 50;
+    ASSERT(uci_score_cp_for_white(&info, false) == 50, "white to move: as is");
+    ASSERT(uci_score_cp_for_white(&info, true) == -50, "black to move: negated");
+    info.is_mate = true;
+    info.mate_in = 2;
+    ASSERT(uci_score_cp_for_white(&info, false) == UCI_MATE_CP - 2,
+           "mate folds to a large cp value");
+    info.mate_in = -1;
+    ASSERT(uci_score_cp_for_white(&info, true) == UCI_MATE_CP - 1,
+           "black getting mated is good for white");
+
+    char txt[16];
+    uci_format_score(35, txt, sizeof(txt));
+    ASSERT(strcmp(txt, "+0.35") == 0, "cp formats as pawns");
+    uci_format_score(-120, txt, sizeof(txt));
+    ASSERT(strcmp(txt, "-1.20") == 0, "negative cp formats");
+    uci_format_score(UCI_MATE_CP - 3, txt, sizeof(txt));
+    ASSERT(strcmp(txt, "M3") == 0, "mate formats as M3");
+    uci_format_score(-(UCI_MATE_CP - 1), txt, sizeof(txt));
+    ASSERT(strcmp(txt, "-M1") == 0, "getting mated formats as -M1");
+}
+
+static void test_uci_flip_side(void) {
+    char out[LONGEST_FEN];
+    ASSERT(uci_fen_flip_side(
+               "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+               out, sizeof(out)),
+           "flip succeeds");
+    ASSERT(strcmp(out, "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1") == 0,
+           "side flipped and en passant cleared");
+    ASSERT(!uci_fen_flip_side("garbage", out, sizeof(out)), "malformed FEN rejected");
+}
+
+static void test_uci_grades(void) {
+    ASSERT(uci_grade_move(0) == GRADE_BEST, "0 cp loss is best");
+    ASSERT(uci_grade_move(25) == GRADE_GOOD, "25 cp is good");
+    ASSERT(uci_grade_move(60) == GRADE_INACCURACY, "60 cp is an inaccuracy");
+    ASSERT(uci_grade_move(150) == GRADE_MISTAKE, "150 cp is a mistake");
+    ASSERT(uci_grade_move(400) == GRADE_BLUNDER, "400 cp is a blunder");
+}
+
+static void test_uci_line_to_san(void) {
+    setup("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    char out[128];
+    uci_line_to_san(board, &game, "e2e4 e7e5 g1f3 b8c6 f1b5", 5, out, sizeof(out));
+    ASSERT(strcmp(out, "1. e4 e5 2. Nf3 Nc6 3. Bb5") == 0, "opening line to SAN");
+    ASSERT(board[6][4].type == PAWN && game.history_count == 0,
+           "conversion leaves the live position untouched");
+    ASSERT(game.can_castle_short[White] && game.en_passant_square.row == -1,
+           "conversion leaves the move-gen context untouched");
+
+    // starts from a black-to-move position and truncates at max_moves
+    setup("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1");
+    uci_line_to_san(board, &game, "e7e5 g1f3 b8c6", 2, out, sizeof(out));
+    ASSERT(strcmp(out, "1... e5 2. Nf3") == 0, "black-first numbering and truncation");
+
+    // an illegal move in the line stops the conversion
+    setup("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    uci_line_to_san(board, &game, "e2e4 e7e6 e4e6", 5, out, sizeof(out));
+    ASSERT(strcmp(out, "1. e4 e6") == 0, "stops at the first illegal move");
+}
+
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
@@ -451,6 +580,14 @@ int main(void) {
     test_threefold_repetition();
 
     test_undo();
+
+    test_uci_parse_info();
+    test_uci_parse_bestmove();
+    test_uci_moves();
+    test_uci_scores();
+    test_uci_flip_side();
+    test_uci_grades();
+    test_uci_line_to_san();
 
     if (tests_failed == 0) {
         printf("All %d tests passed\n", tests_run);
