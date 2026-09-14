@@ -1,4 +1,3 @@
-
 #include "board.h"
 #include "fen.h"
 #include "game.h"
@@ -10,39 +9,9 @@
 // Program main entry point
 //------------------------------------------------------------------------------------
 
-void print_available_captures(int target_row, int target_col,
-                              possible_moves *piece_moves) {
-    const char *piece_names[] = {"Empty", "Pawn",  "Knight", "Bishop",
-                                 "Rook",  "Queen", "King"};
-    const char *col_names[] = {"A", "B", "C", "D", "E", "F", "G", "H"};
-    printf("Captures available from %s%d:\n", col_names[target_col],
-           8 - target_row);
-    for (size_t i = 0; i < piece_moves->count; i++) {
-        int mr = (int)piece_moves->pos[i].y;
-        int mc = (int)piece_moves->pos[i].x;
-        if (board[mr][mc].type != EMPTY) {
-            printf("  can capture %s at %s%d\n",
-                   piece_names[board[mr][mc].type], col_names[mc], 8 - mr);
-        }
-    }
-}
-bool check_stalemate(color player_color) {
-    // use legal moves so pieces pinned to the king are not counted
-    for (int row = 0; row < 8; row++) {
-        for (int col = 0; col < 8; col++) {
-            if (board[row][col].type == EMPTY ||
-                board[row][col].color != player_color)
-                continue;
-            possible_moves moves = {0};
-            generate_legal_moves(board, (board_pos){row, col}, &moves);
-            bool has_move = moves.count > 0;
-            free(moves.pos);
-            if (has_move)
-                return false;
-        }
-    }
-    return true;
-}
+static const int tile_size = 16;
+static const float scale = 5.0f;
+
 static bool is_move_in_list(int target_row, int target_col,
                             const possible_moves *moves) {
     for (size_t i = 0; i < moves->count; i++) {
@@ -53,6 +22,7 @@ static bool is_move_in_list(int target_row, int target_col,
     }
     return false;
 }
+
 static bool select_piece_if_owned(int target_row, int target_col,
                                   color moving_color, board_pos *sel,
                                   possible_moves *moves) {
@@ -63,50 +33,65 @@ static bool select_piece_if_owned(int target_row, int target_col,
     *sel = (board_pos){target_row, target_col};
     moves->count = 0;
     generate_legal_moves(board, *sel, moves);
-    TraceLog(LOG_DEBUG, "Selected piece: %d of color %d",
-             board[sel->row][sel->col].type, board[sel->row][sel->col].color);
-    print_available_captures(target_row, target_col, moves);
     return true;
 }
+
 static void clear_selection(board_pos *sel, possible_moves *moves) {
     *sel = NULL_POS;
     moves->count = 0;
 }
-static void update_castling_rights_after_move(game_state *state,
-                                              piece moving_piece,
-                                              color moving_color,
-                                              board_pos src,
-                                              bool is_capture,
-                                              piece captured_piece,
-                                              board_pos captured_pos) {
-    if (moving_piece.type == KING) {
-        state->can_castle_short[moving_color] = false;
-        state->can_castle_long[moving_color] = false;
-    } else if (moving_piece.type == ROOK) {
-        if (moving_color == White && src.row == 7 && src.col == 0)
-            state->can_castle_long[White] = false;
-        if (moving_color == White && src.row == 7 && src.col == 7)
-            state->can_castle_short[White] = false;
-        if (moving_color == Black && src.row == 0 && src.col == 0)
-            state->can_castle_long[Black] = false;
-        if (moving_color == Black && src.row == 0 && src.col == 7)
-            state->can_castle_short[Black] = false;
+
+// applies a move chosen in the UI and kicks off the animation
+static void commit_move(game_state *state, board_pos src, board_pos dest,
+                        piece_type promotion) {
+    piece moving_piece = board[src.row][src.col];
+    if (!make_move(board, state, src, dest, promotion)) {
+        TraceLog(LOG_WARNING, "Rejected illegal move");
+        return;
     }
-    if (is_capture && captured_piece.type == ROOK) {
-        if (captured_piece.color == White && captured_pos.row == 7 &&
-            captured_pos.col == 0)
-            state->can_castle_long[White] = false;
-        if (captured_piece.color == White && captured_pos.row == 7 &&
-            captured_pos.col == 7)
-            state->can_castle_short[White] = false;
-        if (captured_piece.color == Black && captured_pos.row == 0 &&
-            captured_pos.col == 0)
-            state->can_castle_long[Black] = false;
-        if (captured_piece.color == Black && captured_pos.row == 0 &&
-            captured_pos.col == 7)
-            state->can_castle_short[Black] = false;
-    }
+    start_move_animation(&current_anim, moving_piece, src, dest);
+    update_full_fen(board, state);
+    const ply_record *last = &state->history[state->history_count - 1];
+    TraceLog(LOG_INFO, "%zu%s %s", last->move_count / 2 + 1,
+             last->turn ? "..." : ".", last->san);
+    print_fen();
+    fflush(stdout);
+    color next = turn_to_color(state->turn);
+    if (state->game_over)
+        TraceLog(LOG_WARNING, "%s", result_to_string(state));
+    else if (state->is_in_check[next])
+        TraceLog(LOG_WARNING, "%s king is in check",
+                 next == White ? "White" : "Black");
 }
+
+// while the promotion picker is open every click either picks a piece or
+// cancels the move
+static void handle_promotion_input(game_state *state, Vector2 mouse) {
+    piece_type choice = EMPTY;
+    if (IsKeyPressed(KEY_Q)) choice = QUEEN;
+    if (IsKeyPressed(KEY_R)) choice = ROOK;
+    if (IsKeyPressed(KEY_B)) choice = BISHOP;
+    if (IsKeyPressed(KEY_N)) choice = KNIGHT;
+
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        int picked = promotion_picker_hit(scale, state, mouse);
+        if (picked >= 0)
+            choice = promotion_choices[picked];
+        else {
+            state->promotion_pending = false;
+            return;
+        }
+    }
+    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+        state->promotion_pending = false;
+        return;
+    }
+    if (choice == EMPTY)
+        return;
+    state->promotion_pending = false;
+    commit_move(state, state->promotion_src, state->promotion_dest, choice);
+}
+
 static void handle_input(int target_row, int target_col, game_state *state) {
     if (target_row < 0 || target_col < 0 || current_anim.active)
         return;
@@ -134,132 +119,54 @@ static void handle_input(int target_row, int target_col, game_state *state) {
         return;
     }
 
-    piece moving_piece = board[sel->row][sel->col];
-
-    if (moving_piece.type == KING && abs(target_col - sel->col) == 2) {
-        if (target_col == 6) {
-            // castling validity is fully checked in generate_king_moves so we
-            // only need to execute the rook and king moves here
-            short_castle(board, moving_piece.color);
-            start_move_animation(&current_anim, moving_piece, *sel,
-                                 (board_pos){target_row, target_col});
-            TraceLog(LOG_INFO, "Short castling performed");
-        } else if (target_col == 2) {
-            long_castle(board, moving_piece.color);
-            start_move_animation(&current_anim, moving_piece, *sel,
-                                 (board_pos){target_row, target_col});
-            TraceLog(LOG_INFO, "Long castling performed");
-        }
-        state->can_castle_short[moving_color] = false;
-        state->can_castle_long[moving_color] = false;
-        update_full_fen(board, state);
-        update_capture_matrices(board);
-        state->halfmove_clock++;
-        state->move_count++;
-    } else {
-        bool is_en_passant = moving_piece.type == PAWN &&
-                             sel->col != target_col &&
-                             board[target_row][target_col].type == EMPTY;
-        board_pos captured_pos = is_en_passant
-                                     ? (board_pos){sel->row, target_col}
-                                     : (board_pos){target_row, target_col};
-        piece captured_piece = board[captured_pos.row][captured_pos.col];
-        bool is_capture = captured_piece.type != EMPTY;
-        if (is_en_passant)
-            TraceLog(LOG_INFO, "En passant capture at %c%d",
-                     'A' + target_col, 8 - sel->row);
-        move_piece(board, *sel, (board_pos){target_row, target_col});
-        // auto-promote to queen when a pawn reaches the back rank
-        if (moving_piece.type == PAWN &&
-            (target_row == 0 || target_row == 7)) {
-            board[target_row][target_col].type = QUEEN;
-            TraceLog(LOG_INFO, "Pawn promoted to Queen at %c%d",
-                     'A' + target_col, 8 - target_row);
-        }
-        start_move_animation(&current_anim, moving_piece, *sel,
-                             (board_pos){target_row, target_col});
-        TraceLog(LOG_DEBUG, "Moved piece to: %d, %d", target_row, target_col);
-        update_full_fen(board, state);
-        possible_moves piece_moves = {0};
-        check_possible_moves(board, (board_pos){target_row, target_col},
-                             &piece_moves);
-
-        print_available_captures(target_row, target_col, &piece_moves);
-
-        free(piece_moves.pos);
-        fflush(stdout);
-        print_fen();
-        update_castling_rights_after_move(state, moving_piece, moving_color,
-                                          *sel, is_capture, captured_piece,
-                                          captured_pos);
-        if (moving_piece.type == PAWN || is_capture)
-            state->halfmove_clock = 0;
-        else
-            state->halfmove_clock++;
-        state->move_count++;
+    board_pos src = *sel;
+    board_pos dest = {target_row, target_col};
+    if (is_promotion_move(board, src, dest)) {
+        // hold the move until the player picks a piece
+        state->promotion_pending = true;
+        state->promotion_src = src;
+        state->promotion_dest = dest;
+        clear_selection(sel, moves);
+        return;
     }
-    // Update en passant square: set if double pawn push, clear otherwise
-    state->en_passant_square = NULL_POS;
-    if (moving_piece.type == PAWN && abs(target_row - sel->row) == 2) {
-        state->en_passant_square =
-            (board_pos){(sel->row + target_row) / 2, target_col};
-    }
-    state->turn = !state->turn;
-    update_capture_matrices(board);
-    compute_check_status(board, state);
-    color next = turn_to_color(state->turn);
-    if (state->is_in_check[next]) {
-        TraceLog(LOG_WARNING, "%s king is in check",
-                 next == White ? "White" : "Black");
-    }
-    clear_selection(sel, moves);
+    commit_move(state, src, dest, EMPTY);
 }
 
-void convert_mouse_position_to_board_coordinates(Vector2 mouse_position,
-                                                 float tile_size, int *row,
-                                                 int *col) {
-    if (mouse_position.x < 0 || mouse_position.y < 0) {
-        *row = -1;
-        *col = -1;
-        return;
-    }
-    if (mouse_position.x > tile_size * 8 || mouse_position.y > tile_size * 8) {
-        *row = -1;
-        *col = -1;
-        return;
-    }
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+static void reset_game(game_state *state) {
+    free_game_state(state);
+    initialize_board(board);
+    init_game_state(state);
+    update_full_fen(board, state);
+    update_capture_matrices(board);
+    current_anim.active = false;
+    TraceLog(LOG_INFO, "Game reset");
+}
 
-        *col = (int)(mouse_position.x / tile_size);
-        *row = (int)(mouse_position.y / tile_size);
-        //     const char *col_names[] = {"A", "B", "C", "D", "E", "F", "G",
-        //     "H"}; TraceLog(LOG_INFO, "Clicked on board coordinates: %s%d",
-        //              col_names[*col], *row + 1);
+static void convert_mouse_position_to_board_coordinates(Vector2 mouse_position,
+                                                        float tile_px, int *row,
+                                                        int *col) {
+    *row = -1;
+    *col = -1;
+    if (mouse_position.x < 0 || mouse_position.y < 0)
+        return;
+    if (mouse_position.x >= tile_px * 8 || mouse_position.y >= tile_px * 8)
+        return;
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        *col = (int)(mouse_position.x / tile_px);
+        *row = (int)(mouse_position.y / tile_px);
     }
 }
 
 int main(void) {
-    // Initialization
-    //--------------------------------------------------------------------------------------
-    //
-
-    const int tile_size = 16;
-    const float scale = 5.0f;
     const int margins = 150;
-    const int screenWidth = 1500; // hardcoded for now, should be calculated
-                                  // based on tile size and scale
+    const int screenWidth = 1100;
     const int screenHeight = tile_size * 8 * scale + margins;
     Vector2 mouse_position = {0, 0};
     int target_row = -1, target_col = -1;
 
     SetTraceLogCallback(LogColored);
 
-    InitWindow(screenWidth, screenHeight,
-               "raylib [core] example - basic window");
-
-    //--------------------------------------------------------------------------------------
-    // IcNIT RENDERING
-    //--------------------------------------------------------------------------------------
+    InitWindow(screenWidth, screenHeight, "mischess");
 
     Texture tex_pattern;
     tile tiles[2];
@@ -270,58 +177,48 @@ int main(void) {
     update_full_fen(board, &game);
     update_capture_matrices(board); // seed attacked_by cache before first move
 
-    SetTargetFPS(60); // Set our game to run at 60 frames-per-second
-    // Main game loop
-    while (!WindowShouldClose()) // Detect window close button or ESC key
-    {
+    SetTargetFPS(60);
+    while (!WindowShouldClose()) {
         mouse_position = GetMousePosition();
-        target_row = -1;
-        target_col = -1;
-        convert_mouse_position_to_board_coordinates(
-            mouse_position, tile_size * scale, &target_row, &target_col);
-        if (!game.game_over) {
-            handle_input(target_row, target_col, &game);
-        }
 
-        // check for checkmate / stalemate after every move
-        if (!game.game_over) {
-            color side = turn_to_color(game.turn);
-            if (check_stalemate(side)) {
-                game.game_over = true;
-                if (game.is_in_check[side]) {
-                    TraceLog(LOG_WARNING, "Checkmate! %s wins",
-                             side == White ? "Black" : "White");
-                } else {
-                    TraceLog(LOG_WARNING, "Stalemate! Draw");
+        if (game.promotion_pending) {
+            handle_promotion_input(&game, mouse_position);
+        } else {
+            convert_mouse_position_to_board_coordinates(
+                mouse_position, tile_size * scale, &target_row, &target_col);
+            if (!game.game_over)
+                handle_input(target_row, target_col, &game);
+
+            // R resets, U takes back the last move (also after game over)
+            if (IsKeyPressed(KEY_R))
+                reset_game(&game);
+            if (IsKeyPressed(KEY_U) && !current_anim.active) {
+                if (undo_move(board, &game)) {
+                    update_full_fen(board, &game);
+                    TraceLog(LOG_INFO, "Move undone");
                 }
             }
-        }
-        // R key resets the game at any time
-        if (IsKeyPressed(KEY_R)) {
-            initialize_board(board);
-            init_game_state(&game);
-            update_full_fen(board, &game);
-            update_capture_matrices(board);
-            TraceLog(LOG_INFO, "Game reset");
         }
 
         BeginDrawing();
         ClearBackground((Color){0x40, 0x33, 0x53, 0xFF});
         update_animation(&current_anim);
         draw_chessboard(tiles, &tex_pattern, scale);
+        draw_last_move_highlight(scale, &game);
+        draw_check_highlight(scale, &game);
         draw_pieces(&tex_pattern, scale);
         draw_animation(&tex_pattern, &current_anim, scale);
         draw_board_labels(tile_size, scale);
         draw_selection_highlight(scale, &game.current_selection);
         draw_possible_moves(&game.possible_moves, scale);
         draw_ui(tile_size, scale, &game);
+        draw_move_list(tile_size, scale, screenWidth, screenHeight, &game);
+        draw_promotion_picker(&tex_pattern, scale, &game);
         EndDrawing();
     }
 
-    // De-Initialization
-    //--------------------------------------------------------------------------------------
-    CloseWindow(); // Close window and OpenGL context
-    //--------------------------------------------------------------------------------------
-
+    free_game_state(&game);
+    UnloadTexture(tex_pattern);
+    CloseWindow();
     return 0;
 }
