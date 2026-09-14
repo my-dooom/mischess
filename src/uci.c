@@ -7,6 +7,20 @@ static bool starts_with(const char *s, const char *prefix) {
     return strncmp(s, prefix, strlen(prefix)) == 0;
 }
 
+// strtok_r is not available on MSVC; this is the same thing for a single
+// space separator, advancing *cursor past the returned token
+static char *next_token(char **cursor) {
+    char *p = *cursor;
+    while (*p == ' ') p++;
+    if (!*p)
+        return NULL;
+    char *tok = p;
+    while (*p && *p != ' ') p++;
+    if (*p) *p++ = 0;
+    *cursor = p;
+    return tok;
+}
+
 bool uci_parse_info(const char *line, uci_info *out) {
     if (!starts_with(line, "info "))
         return false;
@@ -17,18 +31,18 @@ bool uci_parse_info(const char *line, uci_info *out) {
     // tokenise on a private copy
     char buf[1024];
     snprintf(buf, sizeof(buf), "%s", line);
-    char *save = NULL;
-    char *tok = strtok_r(buf, " ", &save);
+    char *cursor = buf;
+    char *tok = next_token(&cursor);
     while (tok) {
         if (strcmp(tok, "depth") == 0) {
-            tok = strtok_r(NULL, " ", &save);
+            tok = next_token(&cursor);
             if (tok) out->depth = atoi(tok);
         } else if (strcmp(tok, "multipv") == 0) {
-            tok = strtok_r(NULL, " ", &save);
+            tok = next_token(&cursor);
             if (tok) out->multipv = atoi(tok);
         } else if (strcmp(tok, "score") == 0) {
-            char *kind = strtok_r(NULL, " ", &save);
-            char *val = strtok_r(NULL, " ", &save);
+            char *kind = next_token(&cursor);
+            char *val = next_token(&cursor);
             if (kind && val) {
                 if (strcmp(kind, "cp") == 0) {
                     out->score_cp = atoi(val);
@@ -44,7 +58,7 @@ bool uci_parse_info(const char *line, uci_info *out) {
             // everything after "pv" is the line
             size_t n = 0;
             bool first = true;
-            while ((tok = strtok_r(NULL, " ", &save))) {
+            while ((tok = next_token(&cursor))) {
                 if (first) {
                     snprintf(out->first_move, sizeof(out->first_move), "%s", tok);
                     first = false;
@@ -61,7 +75,7 @@ bool uci_parse_info(const char *line, uci_info *out) {
         } else if (strcmp(tok, "string") == 0) {
             return false;
         }
-        tok = strtok_r(NULL, " ", &save);
+        tok = next_token(&cursor);
     }
     return has_score && out->first_move[0] != '\0';
 }

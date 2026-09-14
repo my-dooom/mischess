@@ -52,6 +52,18 @@ cmake --build build
 ./build/mischess
 ```
 
+A `Makefile` wraps the same steps (GNU make; on Windows use the MSYS2 one):
+
+```sh
+make            # game + tests + bundled Stockfish
+make run        # build and start
+make test       # run the test suite
+make release    # optimised build in build-release/
+make package    # release zip via CPack
+make no-engine  # configure without the Stockfish build
+make GEN=Ninja  # pick a CMake generator; also BUILD=, CONFIG=, ARCH=, JOBS=
+```
+
 ### Stockfish from source
 
 The build compiles [Stockfish](https://github.com/official-stockfish/Stockfish) from the `stockfish/` submodule with its own Makefile and bundles the result as `build/engines/stockfish[.exe]`, which the coach picks up automatically. That step needs a C++17 compiler, GNU make and a POSIX shell (the Makefile also downloads the NNUE network files, so the first build needs network access):

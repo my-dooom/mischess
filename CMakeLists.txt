@@ -3,6 +3,11 @@ project(mischess C)
 
 set(CMAKE_C_STANDARD 99)
 
+# MSVC flags every sscanf/strcpy as deprecated; they are used safely here
+if(MSVC)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+endif()
+
 # Build raylib from source (vendored); disable unused features for faster builds
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_GAMES    OFF CACHE BOOL "" FORCE)
