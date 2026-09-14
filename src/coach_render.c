@@ -138,15 +138,50 @@ static const Color ACCENT_LINES = {0x84, 0xc5, 0xf5, 0xff};
 static const Color ACCENT_THREAT = {0xf0, 0x7a, 0x6e, 0xff};
 static const Color ACCENT_GOLD = {0xf2, 0xc9, 0x6b, 0xff};
 
-static int wrap_text(const char *text, int x, int y, int max_w, int font,
-                     Color col, bool draw) {
+// "12." or "12..." move numbers in a SAN line
+static bool is_move_number(const char *word) {
+    const char *p = word;
+    if (*p < '0' || *p > '9') return false;
+    while (*p >= '0' && *p <= '9') p++;
+    return strcmp(p, ".") == 0 || strcmp(p, "...") == 0;
+}
+
+// draws one line word by word; in SAN mode the move numbers are dimmed so
+// the moves themselves stand out
+static void draw_line(const char *line, int x, int y, int font, Color col,
+                      bool san) {
+    if (!san) {
+        DrawText(line, x, y, font, col);
+        return;
+    }
+    Color dim = Fade(col, 0.45f);
+    int space = MeasureText(" ", font) + font / 4;
+    char buf[256];
+    snprintf(buf, sizeof(buf), "%s", line);
+    char *cursor = buf;
+    while (*cursor) {
+        while (*cursor == ' ') { cursor++; x += space; }
+        if (!*cursor) break;
+        char *end = cursor;
+        while (*end && *end != ' ') end++;
+        char saved = *end;
+        *end = 0;
+        DrawText(cursor, x, y, font, is_move_number(cursor) ? dim : col);
+        x += MeasureText(cursor, font);
+        *end = saved;
+        cursor = end;
+    }
+}
+
+static int wrap_text_ex(const char *text, int x, int y, int max_w, int font,
+                        Color col, bool draw, bool san) {
     // greedy word wrap, returns the y after the last line
     char line[256] = "";
     const char *p = text;
     while (*p) {
         // a newline in the text forces a break
         if (*p == '\n') {
-            if (draw && line[0]) DrawText(line, x, y, font, col);
+            if (draw && line[0]) draw_line(line, x, y, font, col, san);
             if (line[0] || (p > text && p[-1] == '\n')) y += font + 4;
             line[0] = '\0';
             p++;
@@ -158,7 +193,7 @@ static int wrap_text(const char *text, int x, int y, int max_w, int font,
         char trial[256];
         snprintf(trial, sizeof(trial), "%s%s%s", line, line[0] ? " " : "", word);
         if (line[0] && MeasureText(trial, font) > max_w) {
-            if (draw) DrawText(line, x, y, font, col);
+            if (draw) draw_line(line, x, y, font, col, san);
             y += font + 4;
             snprintf(line, sizeof(line), "%s", word);
         } else {
@@ -168,10 +203,15 @@ static int wrap_text(const char *text, int x, int y, int max_w, int font,
         while (*p == ' ') p++;
     }
     if (line[0]) {
-        if (draw) DrawText(line, x, y, font, col);
+        if (draw) draw_line(line, x, y, font, col, san);
         y += font + 4;
     }
     return y;
+}
+
+static int wrap_text(const char *text, int x, int y, int max_w, int font,
+                     Color col, bool draw) {
+    return wrap_text_ex(text, x, y, max_w, font, col, draw, false);
 }
 
 static int text(panel_ctx *p, int y, const char *txt, int font, Color col) {
@@ -182,6 +222,12 @@ static int text(panel_ctx *p, int y, const char *txt, int font, Color col) {
 static int para(panel_ctx *p, int y, const char *txt, int indent, Color col) {
     return wrap_text(txt, p->x + indent, y, p->w - indent, p->small, col,
                      p->draw);
+}
+
+// a SAN line: moves in the main text colour, move numbers dimmed
+static int san_para(panel_ctx *p, int y, const char *txt, int indent) {
+    return wrap_text_ex(txt, p->x + indent, y, p->w - indent, p->small,
+                        TEXT_MAIN, p->draw, true);
 }
 
 typedef int (*card_body)(panel_ctx *p, int y, const coach *c,
@@ -236,7 +282,7 @@ static int body_feedback(panel_ctx *p, int y, const coach *c,
     if (f->best_san[0]) {
         y += 2;
         y = text(p, y, TextFormat("Better: %s", f->best_san), p->font, TEXT_MAIN);
-        y = para(p, y, f->best_line, 16, TEXT_MUTED);
+        y = san_para(p, y, f->best_line, 16);
     }
     return y;
 }
@@ -290,7 +336,7 @@ static int body_hint(panel_ctx *p, int y, const coach *c,
     first_move_san(c->hint_lines[0].pv, mv, sizeof(mv));
     uci_line_to_san_current(c->hint_lines[0].pv, 4, line, sizeof(line));
     y = text(p, y, mv, p->font + 8, ACCENT_HINT);
-    return para(p, y, line, 16, TEXT_MUTED);
+    return san_para(p, y, line, 16);
 }
 
 static int body_candidates(panel_ctx *p, int y, const coach *c,
@@ -313,7 +359,7 @@ static int body_candidates(panel_ctx *p, int y, const coach *c,
                      y + (p->font - p->small), p->small, TEXT_MUTED);
         }
         y += p->font + 2;
-        y = para(p, y, line, 24, TEXT_MUTED);
+        y = san_para(p, y, line, 24);
         y += 2;
     }
     return y;
