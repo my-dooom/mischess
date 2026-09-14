@@ -103,14 +103,23 @@ void draw_pieces(Texture *tex_pattern, float scale) {
     }
 }
 
+// legal targets of the selected piece: a solid teal dot on empty squares,
+// a thick ring around pieces that can be captured; both with a dark rim so
+// they read on light and dark squares alike
 void draw_possible_moves(possible_moves *moves, float scale) {
     float ts = 16.0f * scale;
+    Color mark = (Color){0x3d, 0xd6, 0xc4, 0xff};
+    Color rim = (Color){0x10, 0x0c, 0x1a, 0xb0};
     for (size_t i = 0; i < moves->count; i++) {
-        Vector2 pos = moves->pos[i];
-        Rectangle dest = {pos.x * ts, pos.y * ts, ts, ts};
-        Vector2 center = {(float)dest.x + dest.width / 2,
-                          (float)dest.y + dest.height / 2};
-        DrawCircleV(center, ts * 0.15f, Fade(GREEN, 0.5f));
+        int col = (int)moves->pos[i].x, row = (int)moves->pos[i].y;
+        Vector2 center = {col * ts + ts / 2, row * ts + ts / 2};
+        if (board[row][col].type != EMPTY) {
+            DrawRing(center, ts * 0.38f, ts * 0.48f, 0, 360, 32, rim);
+            DrawRing(center, ts * 0.40f, ts * 0.46f, 0, 360, 32, mark);
+        } else {
+            DrawCircleV(center, ts * 0.20f, rim);
+            DrawCircleV(center, ts * 0.16f, mark);
+        }
     }
 }
 
@@ -129,17 +138,19 @@ void initialize_render(const unsigned char *png, int png_len,
 void draw_board_labels(float tile_size, float scale) {
     const char *col_names[] = {"A", "B", "C", "D", "E", "F", "G", "H"};
     float ts = tile_size * scale;
-    int font_size = ui_font(ts * 0.35f);
+    // coordinates in a warm accent so they stand apart from the panel text
+    int font_size = ui_font(ts * 0.4f);
+    Color label = (Color){0xf2, 0xc9, 0x6b, 0xff};
     for (int c = 0; c < 8; c++) {
         int x =
             (int)(c * ts + ts / 2) - MeasureText(col_names[c], font_size) / 2;
-        DrawText(col_names[c], x, (int)(8 * ts) + 4, font_size, WHITE);
+        DrawText(col_names[c], x, (int)(8 * ts) + 4, font_size, label);
     }
     for (int r = 0; r < 8; r++) {
         int rank = 8 - r;
-        const char *label = TextFormat("%d", rank);
+        const char *label_txt = TextFormat("%d", rank);
         int y = (int)(r * ts + ts / 2) - font_size / 2;
-        DrawText(label, (int)(8 * ts) + 4, y, font_size, WHITE);
+        DrawText(label_txt, (int)(8 * ts) + 6, y, font_size, label);
     }
 }
 
