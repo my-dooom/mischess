@@ -7,44 +7,123 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: windows-latest
+  # ---------------------------------------------------------------------------
+  # Windows: everything happens inside an MSYS2 MINGW64 shell so the Stockfish
+  # Makefile has the GNU make, POSIX sh and g++ it needs, and the game links
+  # against the same toolchain.
+  # ---------------------------------------------------------------------------
+  windows:
     name: Build (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
 
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Add MinGW to PATH
-        run: echo "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      # Stockfish is built from source with its own Makefile, which needs
-      # MSYS2's GNU make and shell (mingw32-make cannot run it)
-      - name: Install GNU make (MSYS2) for the Stockfish build
-        run: C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm --needed make"
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          release: false
+          update: false
+          install: >-
+            make
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
 
       # x86-64-avx2 rather than native so the packaged engine runs on any
       # CPU from the last decade, not just the runner's
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G "MinGW Makefiles" -DMISCHESS_STOCKFISH_ARCH=x86-64-avx2
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMISCHESS_STOCKFISH_ARCH=x86-64-avx2
 
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
 
       - name: Package
         working-directory: build
-        run: cpack -C Release
+        run: cpack
 
-      - name: Upload package
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: mischess-Windows
+          name: mischess-windows
           path: build/mischess-*.zip
 
-  release:
-    needs: build
+  # ---------------------------------------------------------------------------
+  linux:
+    name: Build (Linux)
     runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install raylib build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxi-dev libwayland-dev wayland-protocols libxkbcommon-dev
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DMISCHESS_STOCKFISH_ARCH=x86-64-avx2
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package
+        working-directory: build
+        run: cpack
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mischess-linux
+          path: build/mischess-*.zip
+
+  # ---------------------------------------------------------------------------
+  macos:
+    name: Build (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # macos-latest runners are Apple Silicon; the engine is built for it
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DMISCHESS_STOCKFISH_ARCH=apple-silicon
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package
+        working-directory: build
+        run: cpack
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mischess-macos
+          path: build/mischess-*.zip
+
+  # ---------------------------------------------------------------------------
+  release:
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    # only tags become releases; a manual run just leaves the artifacts
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
 
