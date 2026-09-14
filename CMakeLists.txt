@@ -32,6 +32,11 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 )
 
 # ------------------------------------------------------------
+# Stockfish (coach engine), built from the vendored submodule
+# ------------------------------------------------------------
+include(cmake/Stockfish.cmake)
+
+# ------------------------------------------------------------
 # Installation rules (used by CPack)
 # ------------------------------------------------------------
 install(TARGETS ${PROJECT_NAME}

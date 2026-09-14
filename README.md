@@ -13,7 +13,7 @@ A complete chess game written in C99 on top of [raylib](https://github.com/raysa
 
 ## Coach mode
 
-Drop a Stockfish binary into `engines/` next to the executable (or set `MISCHESS_ENGINE=/path/to/stockfish`, or pass the path as the first argument) and the game starts in coach mode. Without an engine it is a plain two-player board.
+Stockfish is built from source as part of the normal build and bundled next to the executable, so the game starts in coach mode out of the box (see *Building* for requirements and how to point it at a different engine). Without an engine it is a plain two-player board.
 
 The trick that makes it feel instant: **while you think, the engine is already analysing your position at full strength** (MultiPV, infinite search). The moment you move it already knows the best move and its evaluation, so it can grade what you played right away and the engine reply follows without a long pause.
 
@@ -43,7 +43,7 @@ The trick that makes it feel instant: **while you think, the engine is already a
 
 ## Building
 
-Requires CMake 3.16+ and a C compiler. raylib is vendored as a git submodule.
+Requires CMake 3.16+ and a C compiler. raylib and Stockfish are vendored as git submodules.
 
 ```sh
 git submodule update --init
@@ -52,7 +52,27 @@ cmake --build build
 ./build/mischess
 ```
 
-Get Stockfish from <https://stockfishchess.org/download/> and place it at `build/engines/stockfish.exe` (Windows) or `build/engines/stockfish` (Linux/macOS).
+### Stockfish from source
+
+The build compiles [Stockfish](https://github.com/official-stockfish/Stockfish) from the `stockfish/` submodule with its own Makefile and bundles the result as `build/engines/stockfish[.exe]`, which the coach picks up automatically. That step needs a C++17 compiler, GNU make and a POSIX shell (the Makefile also downloads the NNUE network files, so the first build needs network access):
+
+| Platform | What to have |
+|---|---|
+| Windows | MSYS2 with `mingw-w64-x86_64-gcc` and `make` (`pacman -S make`); CMake finds `C:\msys64\usr\bin\make.exe` on its own. CMake 3.25+ |
+| Linux | `g++`, `make`, `curl` or `wget` |
+| macOS | Xcode command line tools |
+
+Options:
+
+```sh
+# skip the engine build entirely (coach is off unless you provide an engine)
+cmake -B build -DMISCHESS_BUILD_STOCKFISH=OFF
+# pick the instruction set; "native" (default) is fastest for this machine,
+# use a portable one for binaries you give to others
+cmake -B build -DMISCHESS_STOCKFISH_ARCH=x86-64-avx2
+```
+
+A prebuilt engine works too: drop it into `build/engines/`, set `MISCHESS_ENGINE=/path/to/stockfish`, or pass the path as the first argument.
 
 ## Tests
 
@@ -75,3 +95,4 @@ cmake --build build --target chess_tests
 | `src/coach.c` | the coach state machine driving the engine |
 | `src/coach_render.c`, `src/render.c` | drawing |
 | `src/main.c` | input and the game loop |
+| `cmake/Stockfish.cmake` | builds the Stockfish submodule and bundles the binary |
