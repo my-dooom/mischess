@@ -2,6 +2,7 @@
 #include "fen.h"
 #include "notation.h"
 #include "raylib.h"
+#include "strategist.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -143,10 +144,13 @@ static void begin_turn(coach *c, piece board[8][8], game_state *state) {
         c->show_hint = false;
         c->threat.valid = false;
         // a null-move search from an in-check position is illegal
-        if (state->is_in_check[to_move])
+        if (state->is_in_check[to_move]) {
+            if (c->plan_pending)
+                coach_ask_strategist(c, board, state);
             begin_analysis(c, board, state);
-        else
+        } else {
             begin_threat(c, board, state);
+        }
         return;
     }
     // engine to move: grade the human's move first if there is one to grade
@@ -278,6 +282,8 @@ static void handle_line(coach *c, const char *line, piece board[8][8],
                     c->threat.valid = true;
                 }
             }
+            if (c->plan_pending)
+                coach_ask_strategist(c, board, state);
             begin_analysis(c, board, state);
         }
         break;
@@ -354,18 +360,30 @@ static void handle_line(coach *c, const char *line, piece board[8][8],
 
     case COACH_PLAY:
         if (uci_parse_info(line, &info)) {
-            if (info.multipv == 1)
+            if (info.multipv == 1) {
                 c->eval_cp_white = uci_score_cp_for_white(&info, state->turn);
+                c->search_last = info;
+                c->search_last_valid = true;
+            }
         } else if (uci_parse_bestmove(line, move, sizeof(move))) {
             if (c->needs_restart) {
                 begin_turn(c, board, state);
                 break;
+            }
+            // remember what the engine meant to follow up with, while the
+            // position it was thinking from is still on the board
+            c->engine_plan_line[0] = '\0';
+            if (c->search_last_valid && c->search_last.pv[0]) {
+                uci_line_to_san(board, state, c->search_last.pv, 5,
+                                c->engine_plan_line, sizeof(c->engine_plan_line));
+                c->engine_plan_cp_white = c->eval_cp_white;
             }
             board_pos src, dest;
             piece_type promo;
             if (move[0] && uci_move_to_squares(move, &src, &dest, &promo) &&
                 make_move(board, state, src, dest, promo)) {
                 c->engine_moved = true;
+                c->plan_pending = true;
                 c->engine_move_src = src;
                 c->engine_move_dest = dest;
                 TraceLog(LOG_INFO, "Coach: engine plays %s",
@@ -402,6 +420,7 @@ void coach_init(coach *c, const char *explicit_path) {
     c->human_color = White;
     c->engine_elo = ELO_START;
     c->show_threat = true;
+    c->show_plan = true;
 
     char exe_dir[512];
     snprintf(exe_dir, sizeof(exe_dir), "%s", GetApplicationDirectory());
@@ -495,6 +514,8 @@ void coach_on_position_changed(coach *c, piece board[8][8],
     if (c->phase == COACH_OFF || c->phase == COACH_BOOT)
         return;
     c->show_hint = false;
+    c->plan_pending = false;
+    strategist_clear_answer();
     if (is_searching(c)) {
         // the running search is stale; its bestmove is discarded
         c->needs_restart = true;
@@ -506,6 +527,58 @@ void coach_on_position_changed(coach *c, piece board[8][8],
     if (c->phase == COACH_STOPPING)
         return;
     begin_turn(c, board, state);
+}
+
+void coach_ask_strategist(coach *c, piece board[8][8], const game_state *state) {
+    c->plan_pending = false;
+    if (strategist_get_state() == STRATEGIST_OFF)
+        return;
+
+    char fen[LONGEST_FEN];
+    current_fen(board, state, fen, sizeof(fen));
+    const char *me = c->human_color == White ? "White" : "Black";
+    const char *them = c->human_color == White ? "Black" : "White";
+
+    // the last few moves, numbered like a score sheet
+    char recent[512] = "";
+    size_t n = 0;
+    size_t first = state->history_count > 10 ? state->history_count - 10 : 0;
+    for (size_t i = first; i < state->history_count && n < sizeof(recent) - 16; i++) {
+        const ply_record *r = &state->history[i];
+        if (!r->turn || i == first)
+            n += (size_t)snprintf(recent + n, sizeof(recent) - n, "%s%zu%s ",
+                                  n ? " " : "", r->move_count / 2 + 1,
+                                  r->turn ? "..." : ".");
+        n += (size_t)snprintf(recent + n, sizeof(recent) - n, "%s", r->san);
+        if (!r->turn) n += (size_t)snprintf(recent + n, sizeof(recent) - n, " ");
+    }
+    const char *last_san = state->history_count
+                               ? state->history[state->history_count - 1].san
+                               : "(none)";
+
+    char eval[16], threat_eval[16];
+    uci_format_score(cp_white_to_human(c, c->eval_cp_white), eval, sizeof(eval));
+    uci_format_score(c->threat.cp_for_human, threat_eval, sizeof(threat_eval));
+
+    char prompt[STRATEGIST_PROMPT_MAX];
+    snprintf(prompt, sizeof(prompt),
+             "The player has the %s pieces and it is the player's move. The opponent has %s.\n"
+             "Position (FEN): %s\n"
+             "Recent moves: %s\n"
+             "The opponent just played %s. Engine evaluation now: %s for the player.\n"
+             "%s%s%s"
+             "%s%s%s%s%s"
+             "Explain the opponent's plan (the %s moves in that line) and what the player must watch out for.",
+             me, them, fen, recent[0] ? recent : "(game start)", last_san, eval,
+             c->engine_plan_line[0] ? "Engine line the opponent was counting on (both sides' moves, standard numbering): " : "",
+             c->engine_plan_line[0] ? c->engine_plan_line : "",
+             c->engine_plan_line[0] ? "\n" : "",
+             c->threat.valid ? "If the player passed, the opponent would play " : "",
+             c->threat.valid ? c->threat.san : "",
+             c->threat.valid ? " (evaluation then " : "",
+             c->threat.valid ? threat_eval : "",
+             c->threat.valid ? " for the player).\n" : "", them);
+    strategist_ask(prompt);
 }
 
 void coach_switch_sides(coach *c, piece board[8][8], game_state *state) {

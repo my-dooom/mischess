@@ -4,3 +4,6 @@
 [submodule "stockfish"]
 	path = stockfish
 	url = https://github.com/official-stockfish/Stockfish
+[submodule "llama.cpp"]
+	path = llama.cpp
+	url = https://github.com/ggml-org/llama.cpp

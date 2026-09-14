@@ -89,6 +89,13 @@ typedef struct {
     bool show_hint;
     bool show_candidates;
     bool show_threat;
+    bool show_plan; // the strategist's description of the opponent's plan
+
+    // the engine's own principal variation when it chose its last move, in
+    // SAN from the position before that move: literally its plan
+    char engine_plan_line[COACH_LINE_MAX];
+    int engine_plan_cp_white;
+    bool plan_pending; // ask the strategist once the threat search is in
 
     // The hint and candidate lines shown to the player are a frozen copy of
     // the analysis, taken once it is deep enough and kept until the position
@@ -128,6 +135,10 @@ void coach_new_game(coach *c, piece board[8][8], game_state *state);
 bool coach_active(const coach *c);
 bool coach_engine_thinking(const coach *c);
 bool coach_is_human_turn(const coach *c, const game_state *state);
+
+// Builds the prompt describing the current position and what the engine
+// intends, and hands it to the strategist. Called after each engine move.
+void coach_ask_strategist(coach *c, piece board[8][8], const game_state *state);
 
 // Returns true once per engine move, handing out its squares.
 bool coach_take_engine_move(coach *c, board_pos *src, board_pos *dest);

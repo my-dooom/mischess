@@ -47,6 +47,12 @@ if(MINGW)
     target_link_options(${PROJECT_NAME} PRIVATE -static -static-libgcc)
 endif()
 
+# the strategist runs its model on a worker thread
+if(NOT WIN32)
+    find_package(Threads REQUIRED)
+    target_link_libraries(${PROJECT_NAME} PRIVATE Threads::Threads)
+endif()
+
 # Hide the console window in release builds (MSVC then expects WinMain
 # unless told to keep the plain main entry point)
 set_target_properties(${PROJECT_NAME} PROPERTIES
@@ -61,6 +67,11 @@ endif()
 # Stockfish (coach engine), built from the vendored submodule
 # ------------------------------------------------------------
 include(cmake/Stockfish.cmake)
+
+# ------------------------------------------------------------
+# llama.cpp (strategist), built from the vendored submodule
+# ------------------------------------------------------------
+include(cmake/Llama.cmake)
 
 # ------------------------------------------------------------
 # Installation rules (used by CPack)

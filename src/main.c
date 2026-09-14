@@ -6,6 +6,7 @@
 #include "logger.h"
 #include "raylib.h"
 #include "render.h"
+#include "strategist.h"
 #include "atlas_png.h"
 
 //------------------------------------------------------------------------------------
@@ -173,6 +174,28 @@ static void take_back(game_state *state) {
     coach_on_position_changed(&the_coach, board, state);
 }
 
+// argv[2], then MISCHESS_MODEL, then the first *.gguf in models/ next to
+// the executable; NULL when nothing is found
+static const char *find_model(const char *explicit_path) {
+    static char path[600];
+    if (explicit_path && explicit_path[0] && FileExists(explicit_path))
+        return explicit_path;
+    const char *env = getenv("MISCHESS_MODEL");
+    if (env && env[0] && FileExists(env))
+        return env;
+    snprintf(path, sizeof(path), "%smodels", GetApplicationDirectory());
+    if (!DirectoryExists(path))
+        return NULL;
+    FilePathList files = LoadDirectoryFilesEx(path, ".gguf", false);
+    const char *found = NULL;
+    if (files.count > 0) {
+        snprintf(path, sizeof(path), "%s", files.paths[0]);
+        found = path;
+    }
+    UnloadDirectoryFiles(files);
+    return found;
+}
+
 static void convert_mouse_position_to_board_coordinates(Vector2 mouse_position,
                                                         float tile_px, int *row,
                                                         int *col) {
@@ -208,6 +231,7 @@ int main(int argc, char **argv) {
     update_capture_matrices(board); // seed attacked_by cache before first move
 
     coach_init(&the_coach, argc > 1 ? argv[1] : NULL);
+    strategist_init(find_model(argc > 2 ? argv[2] : NULL));
 
     SetTargetFPS(60);
     while (!WindowShouldClose()) {
@@ -268,6 +292,8 @@ int main(int argc, char **argv) {
             }
             if (IsKeyPressed(KEY_T))
                 the_coach.show_threat = !the_coach.show_threat;
+            if (IsKeyPressed(KEY_P))
+                the_coach.show_plan = !the_coach.show_plan;
             if (IsKeyPressed(KEY_S) && !current_anim.active)
                 coach_switch_sides(&the_coach, board, &game);
         }
@@ -299,6 +325,7 @@ int main(int argc, char **argv) {
         EndDrawing();
     }
 
+    strategist_shutdown();
     coach_shutdown(&the_coach);
     free_game_state(&game);
     UnloadTexture(tex_pattern);

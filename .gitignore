@@ -2,3 +2,5 @@ build/
 raylib/build/
 compile_commands.json
 engines/
+models/
+build-release/

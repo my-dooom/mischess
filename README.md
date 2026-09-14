@@ -27,6 +27,20 @@ The trick that makes it feel instant: **while you think, the engine is already a
 - **Accuracy report** at the end of the game: counts of each grade, average loss, hints used
 - `S` switches sides so the engine plays White
 
+## Strategist: the opponent's plan in words
+
+On top of the engine numbers, an optional local language model (any GGUF file run through [llama.cpp](https://github.com/ggml-org/llama.cpp), built from the `llama.cpp/` submodule) explains after each engine move what the opponent is planning. The prompt gives the model the FEN, the recent moves, the line the engine was counting on when it chose its move, and the threat search result, so even a small model has something concrete to talk about. Toggle the text with `P`; it streams into the panel as it is written.
+
+No model ships with the game. Put a `.gguf` file into a `models/` folder next to the executable (or set `MISCHESS_MODEL`, or pass the path as the second argument). Suggestions, all open weights:
+
+| Model | Size | Notes |
+|---|---|---|
+| [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF) `q4_k_m` | ~1 GB | Good default: fluent, fast on a CPU (Apache-2.0) |
+| [Qwen2.5-0.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF) `q4_k_m` | ~400 MB | Fastest, rougher prose |
+| [ChessGPT](https://huggingface.co/Waterhorse/chessgpt-chat-v1) | ~1.7 GB at Q4 | Trained on chess games, FEN and commentary; convert with llama.cpp's `convert_hf_to_gguf.py` |
+
+Small general models do not calculate chess; they narrate the engine's findings. That is the point: the engine says what, the model says why in plain language. Build without it with `-DMISCHESS_BUILD_LLM=OFF`; `-DMISCHESS_LLM_NATIVE=ON` tunes llama.cpp for your own CPU.
+
 ## Controls
 
 | Input | Action |
@@ -39,6 +53,7 @@ The trick that makes it feel instant: **while you think, the engine is already a
 | C | Toggle the top three candidate lines (coach) |
 | T | Toggle threat display (coach) |
 | S | Switch sides with the engine (coach) |
+| P | Toggle the opponent's plan text (strategist) |
 | + / - / 0 | Bigger / smaller / default text (the window itself is resizable; the board follows) |
 | Esc | Quit |
 
@@ -112,4 +127,6 @@ cmake --build build --target chess_tests
 | `src/coach.c` | the coach state machine driving the engine |
 | `src/coach_render.c`, `src/render.c` | drawing |
 | `src/main.c` | input and the game loop |
+| `src/strategist.c` | local LLM worker thread (llama.cpp) that narrates the opponent's plan |
 | `cmake/Stockfish.cmake` | builds the Stockfish submodule and bundles the binary |
+| `cmake/Llama.cmake` | builds the llama.cpp submodule into the game |

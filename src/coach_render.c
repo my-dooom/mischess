@@ -2,6 +2,7 @@
 #include "coach_render.h"
 #include "notation.h"
 #include "render.h"
+#include "strategist.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -193,7 +194,7 @@ int draw_coach_panel(int x0, int y0, int w, int h, const coach *c,
     switch (c->phase) {
     case COACH_BOOT:        status = "starting engine..."; break;
     case COACH_THREAT:      status = "looking for threats..."; break;
-    case COACH_ANALYZE:     status = "your move  (H hint, C lines, T threat)"; break;
+    case COACH_ANALYZE:     status = "your move  (H hint, C lines, T threat, P plan)"; break;
     case COACH_EVAL_BEFORE:
     case COACH_EVAL_AFTER:  status = "grading your move..."; break;
     case COACH_PLAY:        status = "engine is thinking..."; break;
@@ -239,6 +240,30 @@ int draw_coach_panel(int x0, int y0, int w, int h, const coach *c,
         y = draw_wrapped(TextFormat("Threat: if you passed, %s (%s)",
                                     c->threat.san, sc),
                          tx, y, tw, small, col);
+        y += 6;
+    }
+
+    // what the opponent is up to, in words (P toggles)
+    if (c->show_plan) {
+        strategist_state st = strategist_get_state();
+        char text[STRATEGIST_ANSWER_MAX];
+        Color header_col = (Color){0xd8, 0xa8, 0xf0, 0xff};
+        if (st == STRATEGIST_OFF) {
+            y = draw_wrapped(TextFormat("Plan: %s", strategist_last_error()),
+                             tx, y, tw, small, GRAY);
+        } else if (st == STRATEGIST_LOADING) {
+            DrawText("Plan: loading model...", tx, y, small, GRAY);
+            y += small + 4;
+        } else if (strategist_answer(text, sizeof(text))) {
+            DrawText(st == STRATEGIST_WRITING ? "Opponent's plan (writing...)"
+                                              : "Opponent's plan",
+                     tx, y, font, header_col);
+            y += font + 4;
+            y = draw_wrapped(text, tx, y, tw, small, WHITE);
+        } else if (st == STRATEGIST_WRITING) {
+            DrawText("Opponent's plan: thinking...", tx, y, font, header_col);
+            y += font + 4;
+        }
         y += 6;
     }
 
