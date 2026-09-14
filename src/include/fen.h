@@ -8,6 +8,8 @@
 
 extern char fen_table[LONGEST_FEN];
 
+// writes the placement field only (no terminator), returns chars written
+int write_piece_placement(piece board[8][8], char *buf);
 int update_fen_table(piece board[8][8]);
 int update_full_fen(piece board[8][8], const game_state *state);
 int load_fen(const char *fen, piece board[8][8], game_state *state);

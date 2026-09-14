@@ -4,7 +4,7 @@
 
 char fen_table[LONGEST_FEN];
 
-static int write_piece_placement(piece board[8][8], char *buf) {
+int write_piece_placement(piece board[8][8], char *buf) {
     int idx = 0;
     for (int r = 0; r < 8; r++) {
         int empty = 0;
